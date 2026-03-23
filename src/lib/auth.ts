@@ -33,10 +33,14 @@ export async function signInHost(email: string): Promise<void> {
     throw new Error("Supabase 환경 변수가 설정되지 않았습니다.");
   }
 
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${window.location.origin}/host`,
+      emailRedirectTo: `${appUrl}/host`,
     },
   });
 
