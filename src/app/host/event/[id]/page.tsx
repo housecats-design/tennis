@@ -24,7 +24,7 @@ function isTieBreak(scoreA: number | null | undefined, scoreB: number | null | u
 
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
-  const eventId = params.id;
+  const eventId = typeof params.id === "string" ? params.id : "";
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [error, setError] = useState<string | null>(null);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -33,11 +33,18 @@ export default function HostEventPage() {
 
   useEffect(() => {
     if (!eventId) {
+      setError("유효하지 않은 이벤트 주소입니다.");
       return;
     }
 
     const refresh = async () => {
-      setEvent(await loadEvent(eventId));
+      try {
+        const nextEvent = await loadEvent(eventId);
+        setEvent(nextEvent);
+      } catch (error) {
+        console.error("[host-event] refresh failed", error);
+        setError(error instanceof Error ? error.message : "이벤트를 불러오지 못했습니다.");
+      }
     };
 
     void refresh();
@@ -59,7 +66,7 @@ export default function HostEventPage() {
     }
 
     return sortLeaderboard(
-      event.participants.map((participant) => ({ id: participant.id, name: participant.displayName })),
+      (Array.isArray(event.participants) ? event.participants : []).map((participant) => ({ id: participant.id, name: participant.displayName })),
       event.stats,
       "asc",
     );

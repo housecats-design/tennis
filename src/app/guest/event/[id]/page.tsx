@@ -12,7 +12,8 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
     return { title: "이벤트 없음", body: "이벤트를 찾을 수 없습니다." };
   }
 
-  if (event.status === "waiting" || event.rounds.length === 0) {
+  const rounds = Array.isArray(event.rounds) ? event.rounds : [];
+  if (event.status === "waiting" || rounds.length === 0) {
     return { title: "대기 중", body: "호스트가 아직 대진을 생성하지 않았습니다." };
   }
 
@@ -21,8 +22,9 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
     return { title: "이벤트 종료", body: "모든 라운드가 종료되었습니다." };
   }
 
-  const match = currentRound.matches.find((currentMatch) =>
-    [...currentMatch.teamA, ...currentMatch.teamB].some((player) => player.id === participantId),
+  const matches = Array.isArray(currentRound.matches) ? currentRound.matches : [];
+  const match = matches.find((currentMatch) =>
+    [...(Array.isArray(currentMatch.teamA) ? currentMatch.teamA : []), ...(Array.isArray(currentMatch.teamB) ? currentMatch.teamB : [])].some((player) => player.id === participantId),
   );
 
   if (!match) {
@@ -46,37 +48,55 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
 
 export default function GuestEventPage() {
   const params = useParams<{ id: string }>();
-  const eventId = params.id;
+  const eventId = typeof params.id === "string" ? params.id : "";
   const [currentEvent, setCurrentEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
   const [participantMeta, setParticipantMeta] = useState<{ name: string; gender: string; skill: string } | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) {
+      setError("유효하지 않은 이벤트 주소입니다.");
+      setLoading(false);
       return;
     }
 
     const sessionId = getSessionId("guest");
     const syncEvent = async () => {
-      const event = await loadEvent(eventId);
-      const lastParticipantId = loadLastParticipant();
-      const participant =
-        (event ? getParticipantBySession(event, sessionId) : null) ??
-        (lastParticipantId ? event?.participants.find((item) => item.id === lastParticipantId) ?? null : null);
+      try {
+        console.debug("[guest-event] sync start", { eventId });
+        const event = await loadEvent(eventId);
+        const participants = Array.isArray(event?.participants) ? event.participants : [];
+        const lastParticipantId = loadLastParticipant();
+        const participant =
+          (event ? getParticipantBySession(event, sessionId) : null) ??
+          (lastParticipantId ? participants.find((item) => item.id === lastParticipantId) ?? null : null);
 
-      setCurrentEvent(event);
-      setParticipantId(participant?.id ?? null);
-      setParticipantMeta(
-        participant
-          ? {
-              name: participant.displayName,
-              gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
-              skill: participant.skillLevel === "high" ? "상" : participant.skillLevel === "low" ? "하" : "중",
-            }
-          : null,
-      );
-      setNotifications(event ? getEventNotifications(event, participant?.id) : []);
+        setCurrentEvent(event);
+        setParticipantId(participant?.id ?? null);
+        setParticipantMeta(
+          participant
+            ? {
+                name: participant.displayName,
+                gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
+                skill: participant.skillLevel === "high" ? "상" : participant.skillLevel === "low" ? "하" : "중",
+              }
+            : null,
+        );
+        setNotifications(event ? getEventNotifications(event, participant?.id) : []);
+        setError(null);
+      } catch (error) {
+        console.error("[guest-event] sync failed", error);
+        setCurrentEvent(null);
+        setParticipantId(null);
+        setParticipantMeta(null);
+        setNotifications([]);
+        setError(error instanceof Error ? error.message : "이벤트 정보를 불러오지 못했습니다.");
+      } finally {
+        setLoading(false);
+      }
     };
 
     void syncEvent();
@@ -105,14 +125,36 @@ export default function GuestEventPage() {
       return;
     }
 
-    const nextEvent = await markEventNotificationRead(eventId, notificationId);
-    setCurrentEvent(nextEvent);
-    setNotifications((current) =>
-      current.map((notification) =>
-        notification.id === notificationId
-          ? { ...notification, readAt: new Date().toISOString() }
-          : notification,
-      ),
+    try {
+      const nextEvent = await markEventNotificationRead(eventId, notificationId);
+      setCurrentEvent(nextEvent);
+      setNotifications((current) =>
+        current.map((notification) =>
+          notification.id === notificationId
+            ? { ...notification, readAt: new Date().toISOString() }
+            : notification,
+        ),
+      );
+    } catch (error) {
+      console.error("[guest-event] mark read failed", error);
+    }
+  }
+
+  if (loading) {
+    return <main className="mx-auto max-w-4xl px-4 py-10 text-sm text-ink/70">게스트 이벤트를 불러오는 중...</main>;
+  }
+
+  if (error) {
+    return (
+      <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          <div className="font-bold">게스트 화면을 불러오지 못했습니다.</div>
+          <div className="mt-2">{error}</div>
+          <Link href="/guest" className="mt-4 inline-flex rounded-2xl bg-white px-4 py-3 font-semibold text-ink">
+            게스트 페이지로 돌아가기
+          </Link>
+        </div>
+      </main>
     );
   }
 

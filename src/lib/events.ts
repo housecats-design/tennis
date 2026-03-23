@@ -36,6 +36,105 @@ type EventRow = {
   updated_at: string | null;
 };
 
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeParticipants(participants: EventRecord["participants"] | null | undefined): EventRecord["participants"] {
+  return safeArray(participants).filter(Boolean).map((participant) => ({
+    ...participant,
+    eventId: participant?.eventId ?? "",
+    displayName: participant?.displayName ?? "",
+    gender: participant?.gender ?? "unspecified",
+    skillLevel: participant?.skillLevel ?? "medium",
+    role: participant?.role ?? "guest",
+    sessionId: participant?.sessionId ?? null,
+    userId: participant?.userId ?? null,
+    joinedAt: participant?.joinedAt ?? undefined,
+    isActive: participant?.isActive ?? true,
+  }));
+}
+
+function normalizeNotifications(notifications: Notification[] | null | undefined): Notification[] {
+  return safeArray(notifications).filter(Boolean).map((notification) => ({
+    ...notification,
+    message: notification?.message ?? "",
+    roundNumber: notification?.roundNumber ?? 0,
+    targetParticipantId: notification?.targetParticipantId ?? null,
+    readAt: notification?.readAt ?? null,
+    createdAt: notification?.createdAt ?? null,
+  }));
+}
+
+function normalizeRounds(rounds: EventRecord["rounds"] | null | undefined): EventRecord["rounds"] {
+  return safeArray(rounds).filter(Boolean).map((round, roundIndex) => ({
+    ...round,
+    id: round?.id ?? undefined,
+    roundNumber: round?.roundNumber ?? roundIndex + 1,
+    completed: Boolean(round?.completed),
+    restPlayers: safeArray(round?.restPlayers).filter(Boolean),
+    matches: safeArray(round?.matches).filter(Boolean).map((match, matchIndex) => ({
+      ...match,
+      id: match?.id ?? undefined,
+      court: match?.court ?? matchIndex + 1,
+      teamA: safeArray(match?.teamA).filter(Boolean),
+      teamB: safeArray(match?.teamB).filter(Boolean),
+      scoreA: typeof match?.scoreA === "number" ? match.scoreA : null,
+      scoreB: typeof match?.scoreB === "number" ? match.scoreB : null,
+      isTieBreak: Boolean(match?.isTieBreak),
+      completed: Boolean(match?.completed),
+      skipped: Boolean(match?.skipped),
+    })),
+  }));
+}
+
+function normalizeStats(
+  stats: EventRecord["stats"] | null | undefined,
+  participants: EventRecord["participants"],
+): EventRecord["stats"] {
+  const nextStats = typeof stats === "object" && stats ? { ...stats } : {};
+  for (const participant of participants) {
+    if (!nextStats[participant.id]) {
+      nextStats[participant.id] = {
+        games: 0,
+        wins: 0,
+        losses: 0,
+        pointsScored: 0,
+        pointsAllowed: 0,
+        pointDiff: 0,
+        winRate: 0,
+        rests: 0,
+      };
+    }
+  }
+
+  return nextStats;
+}
+
+function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "id">): EventRecord {
+  const participants = normalizeParticipants(event.participants);
+  const rounds = normalizeRounds(event.rounds);
+  const notifications = normalizeNotifications(event.notifications);
+
+  return {
+    id: event.id,
+    code: event.code ?? "",
+    eventName: event.eventName ?? "",
+    hostUserId: event.hostUserId ?? "",
+    matchType: event.matchType ?? "singles",
+    courtCount: typeof event.courtCount === "number" ? event.courtCount : 1,
+    roundCount: typeof event.roundCount === "number" ? event.roundCount : 1,
+    roundViewMode: event.roundViewMode ?? "progressive",
+    status: event.status ?? "waiting",
+    participants,
+    rounds,
+    stats: normalizeStats(event.stats, participants),
+    notifications,
+    createdAt: event.createdAt ?? new Date().toISOString(),
+    updatedAt: event.updatedAt ?? new Date().toISOString(),
+  };
+}
+
 function formatSupabaseError(error: { code?: string; message?: string } | null): Error {
   if (error?.code === "PGRST205") {
     return new Error("Supabase events 테이블이 없습니다. supabase/schema.sql을 먼저 적용해 주세요.");
@@ -72,49 +171,66 @@ function cacheEvent(event: EventRecord): void {
 }
 
 function hydrateEvent(row: EventRow): EventRecord {
-  const state = row.state;
-  if (state) {
-    const hydrated: EventRecord = {
-      ...state,
-      id: state.id ?? row.id,
-      code: state.code ?? row.code ?? "",
-      eventName: state.eventName ?? row.event_name,
-      hostUserId: state.hostUserId ?? row.host_user_id,
-      matchType: state.matchType ?? row.match_type,
-      courtCount: state.courtCount ?? row.court_count,
-      roundCount: state.roundCount ?? row.round_count,
-      roundViewMode: state.roundViewMode ?? row.round_view_mode,
-      status: state.status ?? row.status,
-      participants: state.participants ?? [],
-      rounds: state.rounds ?? [],
-      stats: state.stats ?? {},
-      notifications: state.notifications ?? [],
-      createdAt: state.createdAt ?? row.created_at ?? new Date().toISOString(),
-      updatedAt: state.updatedAt ?? row.updated_at ?? new Date().toISOString(),
-    };
-    cacheEvent(hydrated);
-    return hydrated;
-  }
+  try {
+    const state = row.state;
+    if (state) {
+      const hydrated = normalizeEventRecord({
+        ...state,
+        id: state.id ?? row.id,
+        code: state.code ?? row.code ?? "",
+        eventName: state.eventName ?? row.event_name,
+        hostUserId: state.hostUserId ?? row.host_user_id,
+        matchType: state.matchType ?? row.match_type,
+        courtCount: state.courtCount ?? row.court_count,
+        roundCount: state.roundCount ?? row.round_count,
+        roundViewMode: state.roundViewMode ?? row.round_view_mode,
+        status: state.status ?? row.status,
+        createdAt: state.createdAt ?? row.created_at ?? new Date().toISOString(),
+        updatedAt: state.updatedAt ?? row.updated_at ?? new Date().toISOString(),
+      });
+      cacheEvent(hydrated);
+      return hydrated;
+    }
 
-  const fallback: EventRecord = {
-    id: row.id,
-    code: row.code ?? "",
-    eventName: row.event_name,
-    hostUserId: row.host_user_id,
-    matchType: row.match_type,
-    courtCount: row.court_count,
-    roundCount: row.round_count,
-    roundViewMode: row.round_view_mode,
-    status: row.status,
-    participants: [],
-    rounds: [],
-    stats: {},
-    notifications: [],
-    createdAt: row.created_at ?? new Date().toISOString(),
-    updatedAt: row.updated_at ?? new Date().toISOString(),
-  };
-  cacheEvent(fallback);
-  return fallback;
+    const fallback = normalizeEventRecord({
+      id: row.id,
+      code: row.code ?? "",
+      eventName: row.event_name,
+      hostUserId: row.host_user_id,
+      matchType: row.match_type,
+      courtCount: row.court_count,
+      roundCount: row.round_count,
+      roundViewMode: row.round_view_mode,
+      status: row.status,
+      participants: [],
+      rounds: [],
+      stats: {},
+      notifications: [],
+      createdAt: row.created_at ?? new Date().toISOString(),
+      updatedAt: row.updated_at ?? new Date().toISOString(),
+    });
+    cacheEvent(fallback);
+    return fallback;
+  } catch (error) {
+    console.error("[events] hydrateEvent failed", error, row);
+    return normalizeEventRecord({
+      id: row.id,
+      code: row.code ?? "",
+      eventName: row.event_name,
+      hostUserId: row.host_user_id,
+      matchType: row.match_type,
+      courtCount: row.court_count,
+      roundCount: row.round_count,
+      roundViewMode: row.round_view_mode,
+      status: row.status,
+      participants: [],
+      rounds: [],
+      stats: {},
+      notifications: [],
+      createdAt: row.created_at ?? new Date().toISOString(),
+      updatedAt: row.updated_at ?? new Date().toISOString(),
+    });
+  }
 }
 
 async function persistEvent(event: EventRecord): Promise<void> {
@@ -153,30 +269,36 @@ async function persistEvent(event: EventRecord): Promise<void> {
 }
 
 async function loadEventsFromSource(): Promise<EventRecord[]> {
-  if (!isSupabaseEnabled()) {
-    return loadCachedEvents();
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return loadCachedEvents();
-  }
-
-  const { data, error } = await supabase
-    .from("events")
-    .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
-    .order("created_at", { ascending: false });
-
-  if (error || !data) {
-    if (error?.code === "PGRST205") {
+  try {
+    if (!isSupabaseEnabled()) {
       return loadCachedEvents();
     }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return loadCachedEvents();
+    }
+
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      if (error?.code === "PGRST205") {
+        return loadCachedEvents();
+      }
+      console.error("[events] loadEventsFromSource failed", error);
+      return loadCachedEvents();
+    }
+
+    const events = safeArray(data as EventRow[]).map(hydrateEvent);
+    saveCachedEvents(events);
+    return events;
+  } catch (error) {
+    console.error("[events] loadEventsFromSource exception", error);
     return loadCachedEvents();
   }
-
-  const events = (data as EventRow[]).map(hydrateEvent);
-  saveCachedEvents(events);
-  return events;
 }
 
 function emitEventUpdate(event: EventRecord): void {
@@ -289,29 +411,39 @@ export async function createEvent(input: {
 }
 
 export async function loadEvent(eventId: string): Promise<EventRecord | null> {
-  if (!isSupabaseEnabled()) {
-    return loadCachedEvents().find((event) => event.id === eventId) ?? null;
+  if (!eventId?.trim()) {
+    return null;
   }
 
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return loadCachedEvents().find((event) => event.id === eventId) ?? null;
-  }
-
-  const { data, error } = await supabase
-    .from("events")
-    .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
-    .eq("id", eventId)
-    .maybeSingle();
-
-  if (error || !data) {
-    if (error?.code === "PGRST205") {
+  try {
+    if (!isSupabaseEnabled()) {
       return loadCachedEvents().find((event) => event.id === eventId) ?? null;
     }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return loadCachedEvents().find((event) => event.id === eventId) ?? null;
+    }
+
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
+      .eq("id", eventId)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error?.code === "PGRST205") {
+        return loadCachedEvents().find((event) => event.id === eventId) ?? null;
+      }
+      console.error("[events] loadEvent failed", { eventId, error });
+      return loadCachedEvents().find((event) => event.id === eventId) ?? null;
+    }
+
+    return hydrateEvent(data as EventRow);
+  } catch (error) {
+    console.error("[events] loadEvent exception", { eventId, error });
     return loadCachedEvents().find((event) => event.id === eventId) ?? null;
   }
-
-  return hydrateEvent(data as EventRow);
 }
 
 export async function findEventByCodeOrName(query: string): Promise<EventRecord | null> {
@@ -578,7 +710,13 @@ export function subscribeToEvent(eventId: string, callback: () => void): (() => 
 
   const broadcastChannel = createEventBroadcastChannel(eventId);
   if (broadcastChannel) {
-    broadcastChannel.onmessage = () => callback();
+    broadcastChannel.onmessage = () => {
+      try {
+        callback();
+      } catch (error) {
+        console.error("[events] local broadcast callback failed", error);
+      }
+    };
     cleanups.push(() => broadcastChannel.close());
   }
 
@@ -590,7 +728,14 @@ export function subscribeToEvent(eventId: string, callback: () => void): (() => 
           broadcast: { self: true },
         },
       })
-      .on("broadcast", { event: "event_updated" }, () => callback())
+      .on("broadcast", { event: "event_updated" }, (payload) => {
+        try {
+          console.debug("[events] realtime payload", payload);
+          callback();
+        } catch (error) {
+          console.error("[events] realtime callback failed", error, payload);
+        }
+      })
       .subscribe();
 
     if (channel) {
@@ -608,20 +753,21 @@ export function subscribeToEvent(eventId: string, callback: () => void): (() => 
 }
 
 export function getVisibleRounds(event: EventRecord): Round[] {
+  const rounds = safeArray(event?.rounds);
   if (event.roundViewMode === "full") {
-    return event.rounds;
+    return rounds;
   }
 
-  const nextRoundNumber = event.rounds.find((round) => !round.completed)?.roundNumber;
+  const nextRoundNumber = rounds.find((round) => !round.completed)?.roundNumber;
   if (!nextRoundNumber) {
-    return event.rounds;
+    return rounds;
   }
 
-  return event.rounds.filter((round) => round.roundNumber <= nextRoundNumber);
+  return rounds.filter((round) => round.roundNumber <= nextRoundNumber);
 }
 
 export function getCurrentRoundNumber(event: EventRecord): number | null {
-  return event.rounds.find((round) => !round.completed)?.roundNumber ?? null;
+  return safeArray(event?.rounds).find((round) => !round.completed)?.roundNumber ?? null;
 }
 
 export function getCurrentRound(event: EventRecord): Round | null {
@@ -640,7 +786,8 @@ export function getJoinUrl(eventId: string): string {
 }
 
 export function getParticipantInstruction(event: EventRecord, participantId: string): string {
-  if (event.status === "waiting" || event.rounds.length === 0) {
+  const rounds = safeArray(event?.rounds);
+  if (event.status === "waiting" || rounds.length === 0) {
     return "대기 중입니다. 호스트가 대진을 생성하면 자동으로 안내됩니다.";
   }
 
@@ -649,9 +796,9 @@ export function getParticipantInstruction(event: EventRecord, participantId: str
     return "모든 라운드가 완료되었습니다.";
   }
 
-  const match = currentRound.matches.find((currentMatch) =>
+  const match = safeArray(currentRound.matches).find((currentMatch) =>
     !currentMatch.skipped &&
-    [...currentMatch.teamA, ...currentMatch.teamB].some((player) => player.id === participantId),
+    [...safeArray(currentMatch.teamA), ...safeArray(currentMatch.teamB)].some((player) => player.id === participantId),
   );
 
   if (!match) {
@@ -662,7 +809,7 @@ export function getParticipantInstruction(event: EventRecord, participantId: str
 }
 
 export function getRoundInstructions(event: EventRecord): Array<{ participantId: string; name: string; instruction: string }> {
-  return event.participants.map((participant) => ({
+  return safeArray(event?.participants).map((participant) => ({
     participantId: participant.id,
     name: participant.displayName,
     instruction: getParticipantInstruction(event, participant.id),
@@ -670,15 +817,15 @@ export function getRoundInstructions(event: EventRecord): Array<{ participantId:
 }
 
 export function canEditParticipants(event: EventRecord): boolean {
-  return event.rounds.length === 0;
+  return safeArray(event?.rounds).length === 0;
 }
 
 export function getParticipantBySession(event: EventRecord, sessionId: string): Participant | null {
-  return event.participants.find((participant) => participant.sessionId === sessionId) ?? null;
+  return safeArray(event?.participants).find((participant) => participant.sessionId === sessionId) ?? null;
 }
 
 export function getEventNotifications(event: EventRecord, participantId?: string): Notification[] {
-  return getGuestNotifications(event.notifications, participantId);
+  return getGuestNotifications(safeArray(event?.notifications), participantId);
 }
 
 export async function markEventNotificationRead(eventId: string, notificationId: string): Promise<EventRecord | null> {

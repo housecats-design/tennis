@@ -13,39 +13,54 @@ export default function GuestPage() {
   const [skillLevel, setSkillLevel] = useState<SkillLevel>("medium");
   const [eventQuery, setEventQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const eventId = searchParams.get("eventId");
-    if (eventId) {
-      setEventQuery(eventId);
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const eventId = searchParams.get("eventId");
+      if (eventId) {
+        setEventQuery(eventId);
+      }
+    } catch (error) {
+      console.error("[guest-join] failed to read search params", error);
     }
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
+    setSubmitting(true);
 
-    if (!displayName.trim() || !eventQuery.trim() || !gender) {
-      setError("이름, 성별, 이벤트 코드 또는 이벤트 이름을 입력해 주세요.");
-      return;
+    try {
+      if (!displayName.trim() || !eventQuery.trim() || !gender) {
+        setError("이름, 성별, 이벤트 코드 또는 이벤트 이름을 입력해 주세요.");
+        return;
+      }
+
+      console.debug("[guest-join] finding event", { eventQuery });
+      const targetEvent = await findEventByCodeOrName(eventQuery);
+      if (!targetEvent?.id) {
+        setError("이벤트를 찾을 수 없습니다.");
+        return;
+      }
+
+      console.debug("[guest-join] joining event", { eventId: targetEvent.id, displayName, gender, skillLevel });
+      const participant = await joinEvent(targetEvent.id, { displayName, gender, skillLevel });
+      if (!participant?.id) {
+        setError("이벤트 참여에 실패했습니다. 중복 이름인지 확인해 주세요.");
+        return;
+      }
+
+      saveLastEvent(targetEvent.id);
+      saveLastParticipant(participant.id);
+      router.push(`/guest/event/${targetEvent.id}`);
+    } catch (error) {
+      console.error("[guest-join] submit failed", error);
+      setError(error instanceof Error ? error.message : "게스트 참여 중 오류가 발생했습니다.");
+    } finally {
+      setSubmitting(false);
     }
-
-    const targetEvent = await findEventByCodeOrName(eventQuery);
-    if (!targetEvent) {
-      setError("이벤트를 찾을 수 없습니다.");
-      return;
-    }
-
-    const participant = await joinEvent(targetEvent.id, { displayName, gender, skillLevel });
-    if (!participant) {
-      setError("이벤트 참여에 실패했습니다. 중복 이름인지 확인해 주세요.");
-      return;
-    }
-
-    saveLastEvent(targetEvent.id);
-    saveLastParticipant(participant.id);
-    router.push(`/guest/event/${targetEvent.id}`);
   }
 
   return (
@@ -112,9 +127,10 @@ export default function GuestPage() {
 
         <button
           type="submit"
+          disabled={submitting}
           className="inline-flex w-fit rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white"
         >
-          이벤트 참여
+          {submitting ? "참여 중..." : "이벤트 참여"}
         </button>
       </form>
     </main>
