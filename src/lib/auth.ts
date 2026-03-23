@@ -1,5 +1,7 @@
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 
+const DEFAULT_APP_URL = "https://tennis-match-scheduler-nu.vercel.app";
+
 export type HostIdentity = {
   id: string;
   email?: string | null;
@@ -33,9 +35,13 @@ export async function signInHost(email: string): Promise<void> {
     throw new Error("Supabase 환경 변수가 설정되지 않았습니다.");
   }
 
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const windowOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+    configuredAppUrl ||
+    (windowOrigin && !windowOrigin.includes("localhost") ? windowOrigin : DEFAULT_APP_URL);
+
+  console.debug("[auth] signInHost redirect", { appUrl, configuredAppUrl, windowOrigin });
 
   const { error } = await supabase.auth.signInWithOtp({
     email,
