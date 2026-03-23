@@ -7,8 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-function buildAssignmentMessage(eventId: string, participantId: string) {
-  const event = loadEvent(eventId);
+function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | null, participantId: string) {
   if (!event) {
     return { title: "이벤트 없음", body: "이벤트를 찾을 수 없습니다." };
   }
@@ -48,10 +47,10 @@ function buildAssignmentMessage(eventId: string, participantId: string) {
 export default function GuestEventPage() {
   const params = useParams<{ id: string }>();
   const eventId = params.id;
+  const [currentEvent, setCurrentEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
   const [participantMeta, setParticipantMeta] = useState<{ name: string; gender: string; skill: string } | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!eventId) {
@@ -59,55 +58,32 @@ export default function GuestEventPage() {
     }
 
     const sessionId = getSessionId("guest");
-    const event = loadEvent(eventId);
-    const participant =
-      (event ? getParticipantBySession(event, sessionId) : null) ??
-      (loadLastParticipant() ? event?.participants.find((item) => item.id === loadLastParticipant()) ?? null : null);
+    const syncEvent = async () => {
+      const event = await loadEvent(eventId);
+      const lastParticipantId = loadLastParticipant();
+      const participant =
+        (event ? getParticipantBySession(event, sessionId) : null) ??
+        (lastParticipantId ? event?.participants.find((item) => item.id === lastParticipantId) ?? null : null);
 
-    setParticipantId(participant?.id ?? null);
-    setParticipantMeta(
-      participant
-        ? {
-            name: participant.displayName,
-            gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
-            skill: participant.skillLevel === "high" ? "상" : participant.skillLevel === "low" ? "하" : "중",
-          }
-        : null,
-    );
-    setNotifications(getEventNotifications(eventId, participant?.id));
-
-    const interval = window.setInterval(() => {
-      setRefreshKey((current) => current + 1);
-      const nextEvent = loadEvent(eventId);
-      const nextParticipant = nextEvent ? getParticipantBySession(nextEvent, sessionId) : null;
-      setParticipantId(nextParticipant?.id ?? participant?.id ?? null);
+      setCurrentEvent(event);
+      setParticipantId(participant?.id ?? null);
       setParticipantMeta(
-        nextParticipant
+        participant
           ? {
-              name: nextParticipant.displayName,
-              gender: nextParticipant.gender === "male" ? "남성" : nextParticipant.gender === "female" ? "여성" : "미정",
-              skill: nextParticipant.skillLevel === "high" ? "상" : nextParticipant.skillLevel === "low" ? "하" : "중",
+              name: participant.displayName,
+              gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
+              skill: participant.skillLevel === "high" ? "상" : participant.skillLevel === "low" ? "하" : "중",
             }
           : null,
       );
-      setNotifications(getEventNotifications(eventId, nextParticipant?.id ?? participant?.id));
-    }, 3000);
+      setNotifications(event ? getEventNotifications(event, participant?.id) : []);
+    };
 
+    void syncEvent();
+
+    const interval = window.setInterval(syncEvent, 3000);
     const unsubscribe = subscribeToEvent(eventId, () => {
-      setRefreshKey((current) => current + 1);
-      const nextEvent = loadEvent(eventId);
-      const nextParticipant = nextEvent ? getParticipantBySession(nextEvent, sessionId) : null;
-      setParticipantId(nextParticipant?.id ?? participant?.id ?? null);
-      setParticipantMeta(
-        nextParticipant
-          ? {
-              name: nextParticipant.displayName,
-              gender: nextParticipant.gender === "male" ? "남성" : nextParticipant.gender === "female" ? "여성" : "미정",
-              skill: nextParticipant.skillLevel === "high" ? "상" : nextParticipant.skillLevel === "low" ? "하" : "중",
-            }
-          : null,
-      );
-      setNotifications(getEventNotifications(eventId, nextParticipant?.id ?? participant?.id));
+      void syncEvent();
     });
 
     return () => {
@@ -117,21 +93,20 @@ export default function GuestEventPage() {
   }, [eventId]);
 
   const assignment = useMemo(() => {
-    if (!eventId || !participantId) {
+    if (!participantId) {
       return { title: "참여 정보 없음", body: "먼저 이벤트에 참여해 주세요." };
     }
 
-    return buildAssignmentMessage(eventId, participantId);
-  }, [eventId, participantId, refreshKey]);
+    return buildAssignmentMessage(currentEvent, participantId);
+  }, [currentEvent, participantId]);
 
-  const currentEvent = useMemo(() => (eventId ? loadEvent(eventId) : null), [eventId, refreshKey]);
-
-  function handleRead(notificationId: string): void {
+  async function handleRead(notificationId: string): Promise<void> {
     if (!eventId) {
       return;
     }
 
-    markEventNotificationRead(eventId, notificationId);
+    const nextEvent = await markEventNotificationRead(eventId, notificationId);
+    setCurrentEvent(nextEvent);
     setNotifications((current) =>
       current.map((notification) =>
         notification.id === notificationId

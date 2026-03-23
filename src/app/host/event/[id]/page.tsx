@@ -25,7 +25,7 @@ function isTieBreak(scoreA: number | null | undefined, scoreB: number | null | u
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const eventId = params.id;
-  const [event, setEvent] = useState(() => (eventId ? loadEvent(eventId) : null));
+  const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [error, setError] = useState<string | null>(null);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState<Participant["gender"]>("male");
@@ -36,8 +36,11 @@ export default function HostEventPage() {
       return;
     }
 
-    const refresh = () => setEvent(loadEvent(eventId));
-    refresh();
+    const refresh = async () => {
+      setEvent(await loadEvent(eventId));
+    };
+
+    void refresh();
     const interval = window.setInterval(refresh, 3000);
     const unsubscribe = subscribeToEvent(eventId, refresh);
     return () => {
@@ -62,15 +65,15 @@ export default function HostEventPage() {
     );
   }, [event]);
 
-  function refreshEvent(): void {
+  async function refreshEvent(): Promise<void> {
     if (!eventId) {
       return;
     }
 
-    setEvent(loadEvent(eventId));
+    setEvent(await loadEvent(eventId));
   }
 
-  function handleParticipantChange(participantId: string, field: "displayName" | "gender" | "skillLevel", value: string): void {
+  async function handleParticipantChange(participantId: string, field: "displayName" | "gender" | "skillLevel", value: string): Promise<void> {
     if (!event) {
       return;
     }
@@ -78,21 +81,21 @@ export default function HostEventPage() {
     const nextParticipants = event.participants.map((participant) =>
       participant.id === participantId ? { ...participant, [field]: value } : participant,
     );
-    const nextEvent = saveParticipants(event.id, nextParticipants);
+    const nextEvent = await saveParticipants(event.id, nextParticipants);
     setEvent(nextEvent);
   }
 
-  function handleRemoveParticipant(participantId: string): void {
+  async function handleRemoveParticipant(participantId: string): Promise<void> {
     if (!event) {
       return;
     }
 
     const nextParticipants = event.participants.filter((participant) => participant.id !== participantId);
-    const nextEvent = saveParticipants(event.id, nextParticipants);
+    const nextEvent = await saveParticipants(event.id, nextParticipants);
     setEvent(nextEvent);
   }
 
-  function handleAddParticipant(): void {
+  async function handleAddParticipant(): Promise<void> {
     if (!event || !newPlayerName.trim()) {
       return;
     }
@@ -110,14 +113,14 @@ export default function HostEventPage() {
       },
     ];
 
-    const nextEvent = saveParticipants(event.id, nextParticipants);
+    const nextEvent = await saveParticipants(event.id, nextParticipants);
     setEvent(nextEvent);
     setNewPlayerName("");
     setNewPlayerGender("male");
     setNewPlayerSkill("medium");
   }
 
-  function handleGenerateSchedule(): void {
+  async function handleGenerateSchedule(): Promise<void> {
     if (!event) {
       return;
     }
@@ -134,7 +137,7 @@ export default function HostEventPage() {
     }
 
     try {
-      const nextEvent = generateEventSchedule(event.id);
+      const nextEvent = await generateEventSchedule(event.id);
       setError(null);
       setEvent(nextEvent);
     } catch (generationError) {
@@ -142,7 +145,7 @@ export default function HostEventPage() {
     }
   }
 
-  function handleScoreChange(roundNumber: number, matchId: string, key: "scoreA" | "scoreB", value: string): void {
+  async function handleScoreChange(roundNumber: number, matchId: string, key: "scoreA" | "scoreB", value: string): Promise<void> {
     if (!event) {
       return;
     }
@@ -153,20 +156,20 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = updateMatchScores(event.id, roundNumber, matchId, {
+    const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, {
       scoreA: key === "scoreA" ? parseScoreValue(value) : match.scoreA ?? null,
       scoreB: key === "scoreB" ? parseScoreValue(value) : match.scoreB ?? null,
     });
     setEvent(nextEvent);
   }
 
-  function handleFinalizeRound(roundNumber: number): void {
+  async function handleFinalizeRound(roundNumber: number): Promise<void> {
     if (!event) {
       return;
     }
 
     try {
-      const nextEvent = finalizeRound(event.id, roundNumber);
+      const nextEvent = await finalizeRound(event.id, roundNumber);
       setError(null);
       setEvent(nextEvent);
     } catch (finalizeError) {
@@ -174,21 +177,21 @@ export default function HostEventPage() {
     }
   }
 
-  function handleSkipMatch(roundNumber: number, matchId: string): void {
+  async function handleSkipMatch(roundNumber: number, matchId: string): Promise<void> {
     if (!event) {
       return;
     }
 
-    const nextEvent = skipMatch(event.id, roundNumber, matchId);
+    const nextEvent = await skipMatch(event.id, roundNumber, matchId);
     setEvent(nextEvent);
   }
 
-  function handleReassignRound(roundNumber: number): void {
+  async function handleReassignRound(roundNumber: number): Promise<void> {
     if (!event) {
       return;
     }
 
-    const nextEvent = reassignRound(event.id, roundNumber);
+    const nextEvent = await reassignRound(event.id, roundNumber);
     setEvent(nextEvent);
   }
 

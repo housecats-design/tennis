@@ -22,7 +22,7 @@ export default function GuestPage() {
     }
   }, []);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
 
@@ -31,13 +31,13 @@ export default function GuestPage() {
       return;
     }
 
-    const targetEvent = findEventByCodeOrName(eventQuery);
+    const targetEvent = await findEventByCodeOrName(eventQuery);
     if (!targetEvent) {
       setError("이벤트를 찾을 수 없습니다.");
       return;
     }
 
-    const participant = joinEvent(targetEvent.id, { displayName, gender, skillLevel });
+    const participant = await joinEvent(targetEvent.id, { displayName, gender, skillLevel });
     if (!participant) {
       setError("이벤트 참여에 실패했습니다. 중복 이름인지 확인해 주세요.");
       return;

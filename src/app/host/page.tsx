@@ -56,7 +56,7 @@ export default function HostPage() {
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
 
@@ -70,7 +70,7 @@ export default function HostPage() {
       return;
     }
 
-    const { event: nextEvent, hostParticipant } = createEvent({
+    const { event: nextEvent, hostParticipant } = await createEvent({
       eventName,
       hostName,
       matchType,

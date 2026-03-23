@@ -11,15 +11,18 @@ function LeaderboardContent() {
   const searchParams = useSearchParams();
   const eventId = searchParams.get("eventId");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [event, setEvent] = useState(() => (eventId ? loadEvent(eventId) : null));
+  const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
 
   useEffect(() => {
     if (!eventId) {
       return;
     }
 
-    const refresh = () => setEvent(loadEvent(eventId));
-    refresh();
+    const refresh = async () => {
+      setEvent(await loadEvent(eventId));
+    };
+
+    void refresh();
     const interval = window.setInterval(refresh, 3000);
     return () => window.clearInterval(interval);
   }, [eventId]);

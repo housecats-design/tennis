@@ -8,15 +8,18 @@ import { useEffect, useState } from "react";
 export default function HostRoundsPage() {
   const params = useParams<{ id: string }>();
   const eventId = params.id;
-  const [event, setEvent] = useState(() => (eventId ? loadEvent(eventId) : null));
+  const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
 
   useEffect(() => {
     if (!eventId) {
       return;
     }
 
-    const refresh = () => setEvent(loadEvent(eventId));
-    refresh();
+    const refresh = async () => {
+      setEvent(await loadEvent(eventId));
+    };
+
+    void refresh();
     const interval = window.setInterval(refresh, 3000);
     const unsubscribe = subscribeToEvent(eventId, refresh);
     return () => {

@@ -1,5 +1,6 @@
 create table if not exists events (
   id text primary key,
+  code text not null,
   event_name text not null,
   host_user_id text not null,
   match_type text not null,
@@ -7,7 +8,9 @@ create table if not exists events (
   round_count integer not null,
   round_view_mode text not null,
   status text not null,
-  created_at timestamptz default now()
+  state jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 create table if not exists participants (

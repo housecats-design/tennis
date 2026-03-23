@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 export default function EventLeaderboardPage() {
   const params = useParams<{ id: string }>();
   const eventId = params.id;
-  const [event, setEvent] = useState(() => (eventId ? loadEvent(eventId) : null));
+  const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
   useEffect(() => {
@@ -18,8 +18,11 @@ export default function EventLeaderboardPage() {
       return;
     }
 
-    const refresh = () => setEvent(loadEvent(eventId));
-    refresh();
+    const refresh = async () => {
+      setEvent(await loadEvent(eventId));
+    };
+
+    void refresh();
     const interval = window.setInterval(refresh, 3000);
     const unsubscribe = subscribeToEvent(eventId, refresh);
     return () => {
