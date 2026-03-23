@@ -7,6 +7,23 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+function formatNotificationTime(value: string | null | undefined): string {
+  if (!value) {
+    return "--:--";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--:--";
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | null, participantId: string) {
   if (!event) {
     return { title: "이벤트 없음", body: "이벤트를 찾을 수 없습니다." };
@@ -51,7 +68,7 @@ export default function GuestEventPage() {
   const eventId = typeof params.id === "string" ? params.id : "";
   const [currentEvent, setCurrentEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
-  const [participantMeta, setParticipantMeta] = useState<{ name: string; gender: string; skill: string } | null>(null);
+  const [participantMeta, setParticipantMeta] = useState<{ name: string; gender: string; ntrp: string } | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +99,7 @@ export default function GuestEventPage() {
             ? {
                 name: participant.displayName,
                 gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
-                skill: participant.skillLevel === "high" ? "상" : participant.skillLevel === "low" ? "하" : "중",
+                ntrp: typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-",
               }
             : null,
         );
@@ -135,6 +152,10 @@ export default function GuestEventPage() {
     currentMatch && participantId && currentMatch.teamA.some((player) => player.id === participantId),
   );
   const isWaitingPlayer = Boolean(currentRound && !currentMatch);
+  const ownTeam = currentMatch ? (isParticipantInTeamA ? currentMatch.teamA : currentMatch.teamB) : [];
+  const opponentTeam = currentMatch ? (isParticipantInTeamA ? currentMatch.teamB : currentMatch.teamA) : [];
+  const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
+  const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
 
   async function handleSubmitProposal(): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
@@ -221,7 +242,7 @@ export default function GuestEventPage() {
           <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-sm text-ink/75">
             <div>이름: {participantMeta.name}</div>
             <div>성별: {participantMeta.gender}</div>
-            <div>실력: {participantMeta.skill}</div>
+            <div>NTRP: {participantMeta.ntrp}</div>
             <div className="mt-2 font-semibold text-ink">{getParticipantInstruction(currentEvent, participantId)}</div>
           </div>
         ) : null}
@@ -236,26 +257,34 @@ export default function GuestEventPage() {
         <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
           <h2 className="text-2xl font-black">현재 경기</h2>
           <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-surface p-4">
-            <div className="text-sm font-semibold">내 팀: {currentMatch.teamA.map((player) => player.name).join(" / ")}</div>
-            <div className="text-sm font-semibold">
-              내 팀: {(isParticipantInTeamA ? currentMatch.teamA : currentMatch.teamB).map((player) => player.name).join(" / ")}
-            </div>
-            <div className="text-sm font-semibold">
-              상대 팀: {(isParticipantInTeamA ? currentMatch.teamB : currentMatch.teamA).map((player) => player.name).join(" / ")}
-            </div>
+            {currentEvent?.matchType === "singles" ? (
+              <>
+                <div className="text-sm font-semibold">내 선수: {ownTeam.map((player) => player.name).join(" / ")}</div>
+                <div className="text-sm font-semibold">상대 선수: {opponentTeam.map((player) => player.name).join(" / ")}</div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-semibold">내 팀: {ownTeam.map((player) => player.name).join(" / ")}</div>
+                <div className="text-sm font-semibold">상대 팀: {opponentTeam.map((player) => player.name).join(" / ")}</div>
+              </>
+            )}
             <div className="text-sm text-ink/70">코트 {currentMatch.court}</div>
+            <div className="grid gap-2 rounded-2xl border border-line bg-white p-4 text-sm">
+              <div><span className="font-semibold">{teamALabel}:</span> {currentMatch.teamA.map((player) => player.name).join(" / ")}</div>
+              <div><span className="font-semibold">{teamBLabel}:</span> {currentMatch.teamB.map((player) => player.name).join(" / ")}</div>
+            </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <input
                 value={scoreDraft.scoreA}
                 onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
-                placeholder="팀 A 점수"
+                placeholder={`${teamALabel} 점수`}
                 className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
               />
               <input
                 value={scoreDraft.scoreB}
                 onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
-                placeholder="팀 B 점수"
+                placeholder={`${teamBLabel} 점수`}
                 className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
               />
             </div>
@@ -270,7 +299,7 @@ export default function GuestEventPage() {
             {currentMatch.scoreProposal ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 <div className="font-semibold">이 점수가 맞습니까?</div>
-                <div className="mt-2">{currentMatch.scoreProposal.scoreA} : {currentMatch.scoreProposal.scoreB}</div>
+                <div className="mt-2">{teamALabel} {currentMatch.scoreProposal.scoreA} : {teamBLabel} {currentMatch.scoreProposal.scoreB}</div>
                 {currentMatch.scoreProposal.submittedByParticipantId !== participantId ? (
                   <div className="mt-3 flex gap-3">
                     <button type="button" onClick={() => void handleProposalResponse("accept")} className="rounded-2xl bg-white px-4 py-2 font-semibold">
@@ -311,7 +340,7 @@ export default function GuestEventPage() {
         <div className="space-y-3">
           {notifications.length > 0 ? notifications.map((notification) => (
             <div key={notification.id} className="rounded-2xl border border-line bg-surface p-4">
-              <div className="text-sm font-semibold">{notification.message}</div>
+              <div className="text-sm font-semibold">[{formatNotificationTime(notification.createdAt)}] {notification.message}</div>
               <div className="mt-2 text-xs text-ink/55">Round {notification.roundNumber}</div>
               {!notification.readAt ? (
                 <button

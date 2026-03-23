@@ -1,7 +1,7 @@
 "use client";
 
 import { QRCodeSVG } from "qrcode.react";
-import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, getVisibleRounds, loadEvent, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
+import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, loadEvent, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
 import { Participant, PlayerStats, SkillLevel } from "@/lib/types";
@@ -61,7 +61,6 @@ export default function HostEventPage() {
     };
   }, [eventId]);
 
-  const visibleRounds = useMemo(() => (event ? getVisibleRounds(event) : []), [event]);
   const participantsEditable = event ? canEditParticipants(event) : false;
   const joinUrl = useMemo(() => (event ? getJoinUrl(event.id) : ""), [event]);
   const instructions = useMemo(() => (event ? getRoundInstructions(event) : []), [event]);
@@ -79,6 +78,27 @@ export default function HostEventPage() {
       event.stats,
       "asc",
     );
+  }, [event]);
+  const scheduledSummary = useMemo(() => {
+    if (!event) {
+      return {};
+    }
+
+    return event.rounds.reduce<Record<string, { scheduledGames: number; scheduledRests: number }>>((summary, round) => {
+      for (const player of round.restPlayers) {
+        summary[player.id] = summary[player.id] ?? { scheduledGames: 0, scheduledRests: 0 };
+        summary[player.id].scheduledRests += 1;
+      }
+
+      for (const match of round.matches) {
+        for (const player of [...match.teamA, ...match.teamB]) {
+          summary[player.id] = summary[player.id] ?? { scheduledGames: 0, scheduledRests: 0 };
+          summary[player.id].scheduledGames += 1;
+        }
+      }
+
+      return summary;
+    }, {});
   }, [event]);
 
   async function refreshEvent(): Promise<void> {
@@ -411,6 +431,7 @@ export default function HostEventPage() {
             <div className="mt-4 space-y-3">
               {sortedParticipants.map((participant) => {
                 const stats: PlayerStats = event.stats[participant.id];
+                const plan = scheduledSummary[participant.id] ?? { scheduledGames: 0, scheduledRests: 0 };
                 return (
                   <div key={participant.id} className="rounded-2xl border border-line bg-surface p-4">
                     <div className="font-bold">{participant.name}</div>
@@ -419,6 +440,10 @@ export default function HostEventPage() {
                       <span>Wins {stats?.wins ?? 0}</span>
                       <span>Losses {stats?.losses ?? 0}</span>
                       <span>Rests {stats?.rests ?? 0}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink/60">
+                      <span>예정 경기 수 {plan.scheduledGames}</span>
+                      <span>예정 휴식 수 {plan.scheduledRests}</span>
                     </div>
                   </div>
                 );
@@ -451,7 +476,7 @@ export default function HostEventPage() {
             </section>
           ) : null}
 
-          {event.rounds.length > 0 ? visibleRounds.map((round) => (
+          {event.rounds.length > 0 ? event.rounds.map((round) => (
             <article key={round.id ?? round.roundNumber} className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-2xl font-black">Round {round.roundNumber}</h2>
@@ -516,7 +541,7 @@ export default function HostEventPage() {
                         disabled={round.completed}
                         className="rounded-2xl border border-line bg-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
                       >
-                        재배정
+                        이후 라운드 재배정
                       </button>
                     </div>
                     {match.skipped ? (

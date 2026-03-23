@@ -314,10 +314,29 @@ function buildRound(
   };
 }
 
-export function generateSchedule(input: ScheduleRequest): ScheduleResponse {
-  const runtimeStats = cloneStats(input.players);
+function seedSchedulingState(
+  rounds: Round[],
+  matchType: MatchType,
+  players: Player[],
+): {
+  runtimeStats: MutableState;
+  teammateHistory: PairHistory;
+  opponentHistory: PairHistory;
+} {
+  const runtimeStats = cloneStats(players);
   const teammateHistory: PairHistory = {};
   const opponentHistory: PairHistory = {};
+
+  for (const round of rounds) {
+    markRoundUsage(round, runtimeStats);
+    updateHistories(round, matchType, teammateHistory, opponentHistory);
+  }
+
+  return { runtimeStats, teammateHistory, opponentHistory };
+}
+
+export function generateSchedule(input: ScheduleRequest): ScheduleResponse {
+  const { runtimeStats, teammateHistory, opponentHistory } = seedSchedulingState([], input.matchType, input.players);
   const rounds: Round[] = [];
 
   for (let roundNumber = 1; roundNumber <= input.roundCount; roundNumber += 1) {
@@ -349,4 +368,37 @@ export function rebuildRoundMatches(matchType: MatchType, players: Player[], cou
   }
 
   return buildDoublesMatches(players.slice(0, courtCount * 4), {}, {});
+}
+
+export function regenerateRoundsFrom(
+  input: ScheduleRequest & {
+    existingRounds: Round[];
+    startRoundNumber: number;
+  },
+): Round[] {
+  const preservedRounds = input.existingRounds.filter((round) => round.roundNumber < input.startRoundNumber);
+  const { runtimeStats, teammateHistory, opponentHistory } = seedSchedulingState(
+    preservedRounds,
+    input.matchType,
+    input.players,
+  );
+
+  const regeneratedRounds: Round[] = [];
+  for (let roundNumber = input.startRoundNumber; roundNumber <= input.roundCount; roundNumber += 1) {
+    const round = buildRound(
+      roundNumber,
+      input.players,
+      input.matchType,
+      input.courtCount,
+      runtimeStats,
+      teammateHistory,
+      opponentHistory,
+    );
+
+    markRoundUsage(round, runtimeStats);
+    updateHistories(round, input.matchType, teammateHistory, opponentHistory);
+    regeneratedRounds.push(round);
+  }
+
+  return [...preservedRounds, ...regeneratedRounds];
 }

@@ -20,7 +20,7 @@ export default function HostPage() {
   const [matchType, setMatchType] = useState<"singles" | "doubles">("doubles");
   const [courtCount, setCourtCount] = useState(2);
   const [roundCount, setRoundCount] = useState(4);
-  const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("progressive");
+  const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("full");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 

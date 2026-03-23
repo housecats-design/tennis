@@ -1,4 +1,4 @@
-import { generateSchedule, rebuildRoundMatches } from "@/lib/scheduler";
+import { generateSchedule, regenerateRoundsFrom } from "@/lib/scheduler";
 import { createParticipant, resolveParticipantSkill } from "@/lib/participants";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 import {
@@ -835,26 +835,43 @@ export async function reassignRound(eventId: string, roundNumber: number): Promi
     return null;
   }
 
-  const activePlayers = targetRound.matches
-    .filter((match) => !match.skipped)
-    .flatMap((match) => [...match.teamA, ...match.teamB]);
-  const reassignedMatches = rebuildRoundMatches(event.matchType, activePlayers, targetRound.matches.length);
+  const players = buildPlayers(event.participants);
+  const regeneratedRounds = regenerateRoundsFrom({
+    matchType: event.matchType,
+    courtCount: event.courtCount,
+    roundCount: event.roundCount,
+    players,
+    existingRounds: event.rounds,
+    startRoundNumber: roundNumber,
+  });
 
   return updateEvent(eventId, (currentEvent) => ({
     ...currentEvent,
-    rounds: currentEvent.rounds.map((round) =>
-      round.roundNumber === roundNumber
-        ? {
-            ...round,
-            matches: reassignedMatches.map((match, index) => ({
-              ...match,
-              id: round.matches[index]?.id ?? match.id,
-              skipped: false,
-              completed: false,
-            })),
-          }
-        : round,
-    ),
+    rounds: currentEvent.rounds.map((round) => {
+      if (round.roundNumber < roundNumber) {
+        return round;
+      }
+
+      const nextRound = regeneratedRounds.find((item) => item.roundNumber === round.roundNumber);
+      if (!nextRound) {
+        return round;
+      }
+
+      return {
+        ...nextRound,
+        id: round.id ?? nextRound.id,
+        completed: false,
+        matches: nextRound.matches.map((match, index) => ({
+          ...match,
+          id: round.matches[index]?.id ?? match.id,
+          scoreA: null,
+          scoreB: null,
+          scoreProposal: null,
+          skipped: false,
+          completed: false,
+        })),
+      };
+    }),
   }));
 }
 
