@@ -2,15 +2,17 @@
 
 import { findEventByCodeOrName, joinEvent } from "@/lib/events";
 import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
-import { ParticipantGender, SkillLevel } from "@/lib/types";
+import { ParticipantGender } from "@/lib/types";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+
+const NTRP_OPTIONS = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
 
 export default function GuestPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [gender, setGender] = useState<ParticipantGender | "">("");
-  const [skillLevel, setSkillLevel] = useState<SkillLevel>("medium");
+  const [guestNtrp, setGuestNtrp] = useState(3.5);
   const [eventQuery, setEventQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -45,8 +47,8 @@ export default function GuestPage() {
         return;
       }
 
-      console.debug("[guest-join] joining event", { eventId: targetEvent.id, displayName, gender, skillLevel });
-      const participant = await joinEvent(targetEvent.id, { displayName, gender, skillLevel });
+      console.debug("[guest-join] joining event", { eventId: targetEvent.id, displayName, gender, guestNtrp });
+      const participant = await joinEvent(targetEvent.id, { displayName, gender, guestNtrp });
       if (!participant?.id) {
         setError("이벤트 참여에 실패했습니다. 중복 이름인지 확인해 주세요.");
         return;
@@ -107,15 +109,17 @@ export default function GuestPage() {
         </label>
 
         <label className="grid gap-2 text-sm font-semibold">
-          실력
+          NTRP
           <select
-            value={skillLevel}
-            onChange={(event) => setSkillLevel(event.target.value as SkillLevel)}
+            value={guestNtrp}
+            onChange={(event) => setGuestNtrp(Number(event.target.value))}
             className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
           >
-            <option value="high">상</option>
-            <option value="medium">중</option>
-            <option value="low">하</option>
+            {NTRP_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option.toFixed(1)}
+              </option>
+            ))}
           </select>
         </label>
 

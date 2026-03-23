@@ -12,7 +12,30 @@ export function calculateLeaderboard(
     stats = accumulateRoundStats(stats, round, matchType);
   }
 
+  const gameCounts = Object.values(stats).map((item) => item.games);
+  const maxGames = gameCounts.length > 0 ? Math.max(...gameCounts) : 0;
+  for (const playerId of Object.keys(stats)) {
+    stats[playerId].fairPlayWarning = maxGames - stats[playerId].games >= 1;
+  }
+
   return stats;
+}
+
+export function buildMatchHistory(rounds: Round[]) {
+  return rounds.map((round) => ({
+    roundNumber: round.roundNumber,
+    completed: Boolean(round.completed),
+    matches: round.matches.map((match) => ({
+      court: match.court,
+      teamA: match.teamA.map((player) => player.name),
+      teamB: match.teamB.map((player) => player.name),
+      scoreA: match.scoreA ?? null,
+      scoreB: match.scoreB ?? null,
+      skipped: Boolean(match.skipped),
+      disputed: match.scoreProposal?.status === "disputed",
+    })),
+    restPlayers: round.restPlayers.map((player) => player.name),
+  }));
 }
 
 export function sortLeaderboard(

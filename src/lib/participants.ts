@@ -4,11 +4,35 @@ function makeId(): string {
   return `participant_${crypto.randomUUID().slice(0, 8)}`;
 }
 
+export function mapNtrpToSkillLevel(ntrp?: number | null): Participant["skillLevel"] {
+  if (typeof ntrp !== "number") {
+    return "medium";
+  }
+
+  if (ntrp >= 4.5) {
+    return "high";
+  }
+
+  if (ntrp <= 3) {
+    return "low";
+  }
+
+  return "medium";
+}
+
+export function resolveParticipantSkill(input: {
+  guestNtrp?: number | null;
+  hostSkillOverride?: Participant["skillLevel"] | null;
+}): Participant["skillLevel"] {
+  return input.hostSkillOverride ?? mapNtrpToSkillLevel(input.guestNtrp);
+}
+
 export function createParticipant(input: {
   eventId: string;
   displayName: string;
   gender: Participant["gender"];
-  skillLevel: Participant["skillLevel"];
+  guestNtrp?: number | null;
+  hostSkillOverride?: Participant["skillLevel"] | null;
   role: "host" | "guest";
   sessionId?: string;
 }): Participant {
@@ -17,7 +41,12 @@ export function createParticipant(input: {
     eventId: input.eventId,
     displayName: input.displayName.trim(),
     gender: input.gender,
-    skillLevel: input.skillLevel,
+    guestNtrp: input.guestNtrp ?? null,
+    hostSkillOverride: input.hostSkillOverride ?? null,
+    skillLevel: resolveParticipantSkill({
+      guestNtrp: input.guestNtrp,
+      hostSkillOverride: input.hostSkillOverride,
+    }),
     role: input.role,
     sessionId: input.sessionId ?? null,
     joinedAt: new Date().toISOString(),

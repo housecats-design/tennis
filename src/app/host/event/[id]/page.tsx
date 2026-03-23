@@ -3,7 +3,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, getVisibleRounds, loadEvent, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
 import { sortLeaderboard } from "@/lib/leaderboard";
-import { ensureUniqueDisplayNames } from "@/lib/participants";
+import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
 import { Participant, PlayerStats, SkillLevel } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -65,6 +65,10 @@ export default function HostEventPage() {
   const participantsEditable = event ? canEditParticipants(event) : false;
   const joinUrl = useMemo(() => (event ? getJoinUrl(event.id) : ""), [event]);
   const instructions = useMemo(() => (event ? getRoundInstructions(event) : []), [event]);
+  const disputeNotifications = useMemo(
+    () => (event?.notifications ?? []).filter((notification) => notification.message.includes("이의신청")),
+    [event],
+  );
   const sortedParticipants = useMemo(() => {
     if (!event) {
       return [];
@@ -90,13 +94,26 @@ export default function HostEventPage() {
     }
   }
 
-  async function handleParticipantChange(participantId: string, field: "displayName" | "gender" | "skillLevel", value: string): Promise<void> {
+  async function handleParticipantChange(
+    participantId: string,
+    field: "displayName" | "gender" | "hostSkillOverride",
+    value: string,
+  ): Promise<void> {
     if (!event) {
       return;
     }
 
     const nextParticipants = event.participants.map((participant) =>
-      participant.id === participantId ? { ...participant, [field]: value } : participant,
+      participant.id === participantId
+        ? {
+            ...participant,
+            [field]: field === "hostSkillOverride" && !value ? null : value,
+            skillLevel: resolveParticipantSkill({
+              guestNtrp: participant.guestNtrp ?? null,
+              hostSkillOverride: field === "hostSkillOverride" ? (value ? (value as SkillLevel) : null) : participant.hostSkillOverride ?? null,
+            }),
+          }
+        : participant,
     );
     const nextEvent = await saveParticipants(event.id, nextParticipants);
     setEvent(nextEvent);
@@ -124,6 +141,8 @@ export default function HostEventPage() {
         eventId: event.id,
         displayName: newPlayerName.trim(),
         gender: newPlayerGender,
+        guestNtrp: null,
+        hostSkillOverride: newPlayerSkill,
         skillLevel: newPlayerSkill,
         role: "guest",
         sessionId: null,
@@ -283,7 +302,7 @@ export default function HostEventPage() {
 
           <div className="space-y-3">
             {event.participants.map((participant) => (
-              <div key={participant.id} className="grid gap-3 rounded-2xl border border-line bg-surface p-3 sm:grid-cols-[1fr_110px_110px_auto]">
+              <div key={participant.id} className="grid gap-3 rounded-2xl border border-line bg-surface p-3 sm:grid-cols-[1fr_110px_110px_140px_auto]">
                 <input
                   value={participant.displayName}
                   onChange={(event) => handleParticipantChange(participant.id, "displayName", event.target.value)}
@@ -300,12 +319,16 @@ export default function HostEventPage() {
                   <option value="female">여성</option>
                   <option value="unspecified">미정</option>
                 </select>
+                <div className="rounded-2xl border border-line bg-white px-3 py-3 text-sm text-ink/70">
+                  NTRP {typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}
+                </div>
                 <select
-                  value={participant.skillLevel}
-                  onChange={(event) => handleParticipantChange(participant.id, "skillLevel", event.target.value)}
+                  value={participant.hostSkillOverride ?? ""}
+                  onChange={(event) => handleParticipantChange(participant.id, "hostSkillOverride", event.target.value)}
                   disabled={!participantsEditable}
                   className="rounded-2xl border border-line bg-white px-3 py-3 text-sm outline-none focus:border-accent"
                 >
+                  <option value="">자동</option>
                   <option value="high">상</option>
                   <option value="medium">중</option>
                   <option value="low">하</option>
@@ -415,6 +438,19 @@ export default function HostEventPage() {
             </div>
           </section>
 
+          {disputeNotifications.length > 0 ? (
+            <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-panel">
+              <h2 className="text-2xl font-black text-red-800">점수 이의신청</h2>
+              <div className="mt-4 space-y-3">
+                {disputeNotifications.map((notification) => (
+                  <div key={notification.id} className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-700">
+                    {notification.message}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {event.rounds.length > 0 ? visibleRounds.map((round) => (
             <article key={round.id ?? round.roundNumber} className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
               <div className="mb-4 flex items-center justify-between">
@@ -455,6 +491,16 @@ export default function HostEventPage() {
                         className="rounded-2xl border border-line bg-white px-4 py-3 outline-none focus:border-accent disabled:bg-slate-100"
                       />
                     </div>
+                    {match.scoreProposal ? (
+                      <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
+                        match.scoreProposal.status === "disputed"
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-amber-200 bg-amber-50 text-amber-900"
+                      }`}>
+                        제출 점수 {match.scoreProposal.scoreA}:{match.scoreProposal.scoreB} /
+                        상태 {match.scoreProposal.status === "pending" ? "확인 대기" : match.scoreProposal.status === "accepted" ? "확정" : "이의신청"}
+                      </div>
+                    ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"

@@ -10,6 +10,7 @@ export function createEmptyStats(): PlayerStats {
     pointDiff: 0,
     winRate: 0,
     rests: 0,
+    fairPlayWarning: false,
   };
 }
 

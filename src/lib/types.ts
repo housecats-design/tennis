@@ -4,12 +4,25 @@ export type EventStatus = "waiting" | "in_progress" | "completed";
 export type ParticipantRole = "host" | "guest";
 export type ParticipantGender = "male" | "female" | "unspecified";
 export type SkillLevel = "high" | "medium" | "low";
+export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
 
 export type Player = {
   id: string;
   name: string;
   gender?: ParticipantGender;
+  guestNtrp?: number | null;
+  hostSkillOverride?: SkillLevel | null;
   skillLevel?: SkillLevel;
+};
+
+export type ScoreProposal = {
+  scoreA: number;
+  scoreB: number;
+  submittedByParticipantId: string;
+  submittedAt: string;
+  acceptedByParticipantIds: string[];
+  disputedByParticipantIds: string[];
+  status: ScoreProposalStatus;
 };
 
 export type Match = {
@@ -22,6 +35,7 @@ export type Match = {
   isTieBreak?: boolean;
   completed?: boolean;
   skipped?: boolean;
+  scoreProposal?: ScoreProposal | null;
 };
 
 export type Round = {
@@ -41,6 +55,7 @@ export type PlayerStats = {
   pointDiff: number;
   winRate: number;
   rests: number;
+  fairPlayWarning?: boolean;
 };
 
 export type ScheduleRequest = {
@@ -76,6 +91,8 @@ export type Participant = {
   sessionId?: string | null;
   displayName: string;
   gender: ParticipantGender;
+  guestNtrp?: number | null;
+  hostSkillOverride?: SkillLevel | null;
   skillLevel: SkillLevel;
   role: ParticipantRole;
   joinedAt?: string;

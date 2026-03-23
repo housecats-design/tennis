@@ -1,6 +1,6 @@
 "use client";
 
-import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, subscribeToEvent } from "@/lib/events";
+import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent } from "@/lib/events";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
 import { Notification } from "@/lib/types";
 import Link from "next/link";
@@ -55,6 +55,7 @@ export default function GuestEventPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
 
   useEffect(() => {
     if (!eventId) {
@@ -119,6 +120,48 @@ export default function GuestEventPage() {
 
     return buildAssignmentMessage(currentEvent, participantId);
   }, [currentEvent, participantId]);
+
+  const currentRound = useMemo(() => (currentEvent ? getCurrentRound(currentEvent) : null), [currentEvent]);
+  const currentMatch = useMemo(() => {
+    if (!currentRound || !participantId) {
+      return null;
+    }
+
+    return (Array.isArray(currentRound.matches) ? currentRound.matches : []).find((match) =>
+      [...(Array.isArray(match.teamA) ? match.teamA : []), ...(Array.isArray(match.teamB) ? match.teamB : [])].some((player) => player.id === participantId),
+    ) ?? null;
+  }, [currentRound, participantId]);
+  const isParticipantInTeamA = Boolean(
+    currentMatch && participantId && currentMatch.teamA.some((player) => player.id === participantId),
+  );
+  const isWaitingPlayer = Boolean(currentRound && !currentMatch);
+
+  async function handleSubmitProposal(): Promise<void> {
+    if (!eventId || !currentRound || !currentMatch || !participantId) {
+      return;
+    }
+
+    const scoreA = Number(scoreDraft.scoreA);
+    const scoreB = Number(scoreDraft.scoreB);
+    if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB)) {
+      setError("점수는 정수여야 합니다.");
+      return;
+    }
+
+    await submitMatchScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, {
+      scoreA,
+      scoreB,
+    });
+    setScoreDraft({ scoreA: "", scoreB: "" });
+  }
+
+  async function handleProposalResponse(response: "accept" | "dispute"): Promise<void> {
+    if (!eventId || !currentRound || !currentMatch || !participantId) {
+      return;
+    }
+
+    await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response);
+  }
 
   async function handleRead(notificationId: string): Promise<void> {
     if (!eventId) {
@@ -188,6 +231,74 @@ export default function GuestEventPage() {
           </p>
         ) : null}
       </section>
+
+      {currentMatch && participantId ? (
+        <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+          <h2 className="text-2xl font-black">현재 경기</h2>
+          <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-surface p-4">
+            <div className="text-sm font-semibold">내 팀: {currentMatch.teamA.map((player) => player.name).join(" / ")}</div>
+            <div className="text-sm font-semibold">
+              내 팀: {(isParticipantInTeamA ? currentMatch.teamA : currentMatch.teamB).map((player) => player.name).join(" / ")}
+            </div>
+            <div className="text-sm font-semibold">
+              상대 팀: {(isParticipantInTeamA ? currentMatch.teamB : currentMatch.teamA).map((player) => player.name).join(" / ")}
+            </div>
+            <div className="text-sm text-ink/70">코트 {currentMatch.court}</div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input
+                value={scoreDraft.scoreA}
+                onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
+                placeholder="팀 A 점수"
+                className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+              />
+              <input
+                value={scoreDraft.scoreB}
+                onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
+                placeholder="팀 B 점수"
+                className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSubmitProposal()}
+              className="inline-flex w-fit rounded-2xl bg-accentStrong px-4 py-3 text-sm font-bold text-white"
+            >
+              점수 제출
+            </button>
+
+            {currentMatch.scoreProposal ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="font-semibold">이 점수가 맞습니까?</div>
+                <div className="mt-2">{currentMatch.scoreProposal.scoreA} : {currentMatch.scoreProposal.scoreB}</div>
+                {currentMatch.scoreProposal.submittedByParticipantId !== participantId ? (
+                  <div className="mt-3 flex gap-3">
+                    <button type="button" onClick={() => void handleProposalResponse("accept")} className="rounded-2xl bg-white px-4 py-2 font-semibold">
+                      수락
+                    </button>
+                    <button type="button" onClick={() => void handleProposalResponse("dispute")} className="rounded-2xl bg-white px-4 py-2 font-semibold text-red-700">
+                      이의신청
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-3 text-xs text-ink/70">다른 선수들의 확인을 기다리는 중입니다.</div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {isWaitingPlayer ? (
+        <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+          <h2 className="text-2xl font-black">대기 화면</h2>
+          <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-sm text-ink/75">
+            <div>현재 라운드 현황을 실시간으로 보고 있습니다.</div>
+            <div className="mt-2 font-semibold">{currentEvent ? getParticipantInstruction(currentEvent, participantId ?? "") : "다음 매치를 기다리는 중입니다."}</div>
+            <div className="mt-4 text-xs text-ink/60">다음 매치가 배정되면 이 화면이 자동으로 경기 화면으로 바뀝니다.</div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
         <div className="mb-4 flex items-center justify-between">

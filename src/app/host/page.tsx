@@ -17,7 +17,7 @@ export default function HostPage() {
   const [email, setEmail] = useState("");
   const [eventName, setEventName] = useState("");
   const [hostName, setHostName] = useState("");
-  const [matchType, setMatchType] = useState<"singles" | "doubles">("singles");
+  const [matchType, setMatchType] = useState<"singles" | "doubles">("doubles");
   const [courtCount, setCourtCount] = useState(2);
   const [roundCount, setRoundCount] = useState(4);
   const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("progressive");

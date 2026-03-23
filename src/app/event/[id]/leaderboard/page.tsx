@@ -1,7 +1,7 @@
 "use client";
 
 import { loadEvent, subscribeToEvent } from "@/lib/events";
-import { sortLeaderboard } from "@/lib/leaderboard";
+import { buildMatchHistory, sortLeaderboard } from "@/lib/leaderboard";
 import { Player, SortDirection } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -42,6 +42,7 @@ export default function EventLeaderboardPage() {
       sortDirection,
     );
   }, [event, sortDirection]);
+  const matchHistory = useMemo(() => (event ? buildMatchHistory(event.rounds) : []), [event]);
 
   if (!event) {
     return <main className="mx-auto max-w-3xl px-4 py-10 text-sm text-ink/70">이벤트가 없습니다.</main>;
@@ -93,12 +94,40 @@ export default function EventLeaderboardPage() {
                     <td className="px-3 py-4">{stats.pointsAllowed}</td>
                     <td className="px-3 py-4">{stats.pointDiff}</td>
                     <td className="px-3 py-4">{stats.winRate}%</td>
-                    <td className="px-3 py-4">{stats.rests}</td>
+                    <td className="px-3 py-4">
+                      <div>{stats.rests}</div>
+                      {stats.fairPlayWarning ? (
+                        <div className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-800">
+                          경기수 부족
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-3xl border border-line bg-white/90 p-4 shadow-panel sm:p-6">
+        <h2 className="text-2xl font-black">라운드별 경기 이력</h2>
+        <div className="mt-4 space-y-4">
+          {matchHistory.map((round) => (
+            <article key={round.roundNumber} className="rounded-2xl border border-line bg-surface p-4">
+              <div className="font-semibold">Round {round.roundNumber}</div>
+              <div className="mt-3 space-y-2 text-sm text-ink/75">
+                {round.matches.map((match, index) => (
+                  <div key={`${round.roundNumber}-${index}`} className="rounded-2xl bg-white px-4 py-3">
+                    Court {match.court} / {match.teamA.join(" / ")} vs {match.teamB.join(" / ")} / {match.scoreA ?? "-"}:{match.scoreB ?? "-"}
+                    {match.skipped ? " / 건너뜀" : ""}
+                    {match.disputed ? " / 이의신청" : ""}
+                  </div>
+                ))}
+                <div className="text-xs text-ink/60">휴식: {round.restPlayers.length > 0 ? round.restPlayers.join(", ") : "없음"}</div>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
     </main>

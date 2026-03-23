@@ -1,5 +1,5 @@
 import { generateSchedule, rebuildRoundMatches } from "@/lib/scheduler";
-import { createParticipant } from "@/lib/participants";
+import { createParticipant, resolveParticipantSkill } from "@/lib/participants";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 import {
   createEventBroadcastChannel,
@@ -46,7 +46,12 @@ function normalizeParticipants(participants: EventRecord["participants"] | null 
     eventId: participant?.eventId ?? "",
     displayName: participant?.displayName ?? "",
     gender: participant?.gender ?? "unspecified",
-    skillLevel: participant?.skillLevel ?? "medium",
+    guestNtrp: typeof participant?.guestNtrp === "number" ? participant.guestNtrp : null,
+    hostSkillOverride: participant?.hostSkillOverride ?? null,
+    skillLevel: resolveParticipantSkill({
+      guestNtrp: typeof participant?.guestNtrp === "number" ? participant.guestNtrp : null,
+      hostSkillOverride: participant?.hostSkillOverride ?? null,
+    }),
     role: participant?.role ?? "guest",
     sessionId: participant?.sessionId ?? null,
     userId: participant?.userId ?? null,
@@ -84,6 +89,17 @@ function normalizeRounds(rounds: EventRecord["rounds"] | null | undefined): Even
       isTieBreak: Boolean(match?.isTieBreak),
       completed: Boolean(match?.completed),
       skipped: Boolean(match?.skipped),
+      scoreProposal: match?.scoreProposal
+        ? {
+            scoreA: match.scoreProposal.scoreA,
+            scoreB: match.scoreProposal.scoreB,
+            submittedByParticipantId: match.scoreProposal.submittedByParticipantId,
+            submittedAt: match.scoreProposal.submittedAt,
+            acceptedByParticipantIds: safeArray(match.scoreProposal.acceptedByParticipantIds),
+            disputedByParticipantIds: safeArray(match.scoreProposal.disputedByParticipantIds),
+            status: match.scoreProposal.status ?? "pending",
+          }
+        : null,
     })),
   }));
 }
@@ -339,6 +355,8 @@ function buildPlayers(participants: Participant[]): Player[] {
     id: participant.id,
     name: participant.displayName,
     gender: participant.gender,
+    guestNtrp: participant.guestNtrp ?? null,
+    hostSkillOverride: participant.hostSkillOverride ?? null,
     skillLevel: participant.skillLevel,
   }));
 }
@@ -384,7 +402,8 @@ export async function createEvent(input: {
     role: "host",
     sessionId,
     gender: "unspecified",
-    skillLevel: "medium",
+    guestNtrp: null,
+    hostSkillOverride: "medium",
   });
 
   const event: EventRecord = {
@@ -465,7 +484,7 @@ export async function findEventByCodeOrName(query: string): Promise<EventRecord 
 
 export async function joinEvent(
   eventId: string,
-  input: { displayName: string; gender: ParticipantGender; skillLevel?: SkillLevel },
+  input: { displayName: string; gender: ParticipantGender; guestNtrp?: number | null },
 ): Promise<Participant | null> {
   const sessionId = getSessionId("guest");
   const event = await loadEvent(eventId);
@@ -491,7 +510,8 @@ export async function joinEvent(
     sessionId,
     displayName: normalizedName,
     gender: input.gender,
-    skillLevel: input.skillLevel ?? "medium",
+    guestNtrp: input.guestNtrp ?? null,
+    hostSkillOverride: null,
     role: "guest",
   });
 
@@ -504,10 +524,20 @@ export async function joinEvent(
 }
 
 export async function saveParticipants(eventId: string, participants: Participant[]): Promise<EventRecord | null> {
+  const normalizedParticipants = participants.map((participant) => ({
+    ...participant,
+    guestNtrp: participant.guestNtrp ?? null,
+    hostSkillOverride: participant.hostSkillOverride ?? null,
+    skillLevel: resolveParticipantSkill({
+      guestNtrp: participant.guestNtrp ?? null,
+      hostSkillOverride: participant.hostSkillOverride ?? null,
+    }),
+  }));
+
   return updateEvent(eventId, (event) => ({
     ...event,
-    participants,
-    stats: createStatsRecord(buildPlayers(participants)),
+    participants: normalizedParticipants,
+    stats: createStatsRecord(buildPlayers(normalizedParticipants)),
   }));
 }
 
@@ -554,6 +584,15 @@ function isValidScore(scoreA: number | null | undefined, scoreB: number | null |
     (scoreA === 6 && typeof scoreB === "number" && scoreB >= 0 && scoreB <= 5) ||
     (scoreB === 6 && typeof scoreA === "number" && scoreA >= 0 && scoreA <= 5)
   );
+}
+
+function getMatchParticipantIds(round: Round, matchId: string): string[] {
+  const match = safeArray(round.matches).find((item) => item.id === matchId);
+  if (!match) {
+    return [];
+  }
+
+  return [...safeArray(match.teamA), ...safeArray(match.teamB)].map((player) => player.id);
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -636,6 +675,7 @@ export async function updateMatchScores(
                     ...match,
                     scoreA: scores.scoreA,
                     scoreB: scores.scoreB,
+                    scoreProposal: null,
                     isTieBreak:
                       (scores.scoreA === 6 && scores.scoreB === 5) ||
                       (scores.scoreA === 5 && scores.scoreB === 6),
@@ -646,6 +686,119 @@ export async function updateMatchScores(
         : round,
     ),
   }));
+}
+
+export async function submitMatchScoreProposal(
+  eventId: string,
+  roundNumber: number,
+  matchId: string,
+  participantId: string,
+  scores: { scoreA: number; scoreB: number },
+): Promise<EventRecord | null> {
+  return updateEvent(eventId, (event) => ({
+    ...event,
+    rounds: event.rounds.map((round) =>
+      round.roundNumber === roundNumber
+        ? {
+            ...round,
+            matches: round.matches.map((match) =>
+              match.id === matchId
+                ? {
+                    ...match,
+                    scoreProposal: {
+                      scoreA: scores.scoreA,
+                      scoreB: scores.scoreB,
+                      submittedByParticipantId: participantId,
+                      submittedAt: new Date().toISOString(),
+                      acceptedByParticipantIds: [],
+                      disputedByParticipantIds: [],
+                      status: "pending",
+                    },
+                  }
+                : match,
+            ),
+          }
+        : round,
+    ),
+  }));
+}
+
+export async function respondToScoreProposal(
+  eventId: string,
+  roundNumber: number,
+  matchId: string,
+  participantId: string,
+  response: "accept" | "dispute",
+): Promise<EventRecord | null> {
+  return updateEvent(eventId, (event) => {
+    const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
+
+    return {
+      ...event,
+      notifications:
+        response === "dispute" && hostParticipant
+          ? [
+              ...event.notifications,
+              {
+                id: makeId("notification_dispute"),
+                eventId,
+                roundNumber,
+                targetParticipantId: hostParticipant.id,
+                message: `점수 이의신청 발생: Round ${roundNumber}, Match ${matchId}`,
+                readAt: null,
+                createdAt: new Date().toISOString(),
+              },
+            ]
+          : event.notifications,
+      rounds: event.rounds.map((round) => {
+        if (round.roundNumber !== roundNumber) {
+          return round;
+        }
+
+        const participantIds = getMatchParticipantIds(round, matchId);
+        return {
+          ...round,
+          matches: round.matches.map((match) => {
+            if (match.id !== matchId || !match.scoreProposal) {
+              return match;
+            }
+
+            const acceptedByParticipantIds =
+              response === "accept"
+                ? Array.from(new Set([...match.scoreProposal.acceptedByParticipantIds, participantId]))
+                : match.scoreProposal.acceptedByParticipantIds;
+
+            const disputedByParticipantIds =
+              response === "dispute"
+                ? Array.from(new Set([...match.scoreProposal.disputedByParticipantIds, participantId]))
+                : match.scoreProposal.disputedByParticipantIds;
+
+            const requiredAcceptCount = Math.max(
+              participantIds.filter((id) => id !== match.scoreProposal?.submittedByParticipantId).length,
+              0,
+            );
+            const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
+
+            return {
+              ...match,
+              scoreA: accepted ? match.scoreProposal.scoreA : match.scoreA ?? null,
+              scoreB: accepted ? match.scoreProposal.scoreB : match.scoreB ?? null,
+              isTieBreak:
+                accepted &&
+                ((match.scoreProposal.scoreA === 6 && match.scoreProposal.scoreB === 5) ||
+                  (match.scoreProposal.scoreA === 5 && match.scoreProposal.scoreB === 6)),
+              scoreProposal: {
+                ...match.scoreProposal,
+                acceptedByParticipantIds,
+                disputedByParticipantIds,
+                status: disputedByParticipantIds.length > 0 ? "disputed" : accepted ? "accepted" : "pending",
+              },
+            };
+          }),
+        };
+      }),
+    };
+  });
 }
 
 export async function skipMatch(eventId: string, roundNumber: number, matchId: string): Promise<EventRecord | null> {

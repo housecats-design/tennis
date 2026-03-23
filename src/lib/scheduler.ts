@@ -22,9 +22,44 @@ function skillScore(level?: SkillLevel): number {
   return 2;
 }
 
+function effectiveSkillScore(player: Player): number {
+  if (typeof player.guestNtrp === "number") {
+    const overrideBias = player.hostSkillOverride ? skillScore(player.hostSkillOverride) - 2 : 0;
+    return player.guestNtrp + overrideBias * 0.35;
+  }
+
+  return skillScore(player.hostSkillOverride ?? player.skillLevel);
+}
+
 function mixedTeamPenalty(team: Player[]): number {
   const genders = new Set(team.map((player) => player.gender).filter(Boolean));
   return genders.has("male") && genders.has("female") ? 0 : 6;
+}
+
+function matchupGenderPenalty(teamA: Player[], teamB: Player[]): number {
+  const teamAMaleCount = teamA.filter((player) => player.gender === "male").length;
+  const teamAFemaleCount = teamA.filter((player) => player.gender === "female").length;
+  const teamBMaleCount = teamB.filter((player) => player.gender === "male").length;
+  const teamBFemaleCount = teamB.filter((player) => player.gender === "female").length;
+
+  const isWomenDoubles = teamAFemaleCount === 2 && teamBFemaleCount === 2;
+  const isMixedDoubles =
+    teamAMaleCount === 1 &&
+    teamAFemaleCount === 1 &&
+    teamBMaleCount === 1 &&
+    teamBFemaleCount === 1;
+
+  if (isWomenDoubles || isMixedDoubles) {
+    return 0;
+  }
+
+  const isGenderMismatch =
+    (teamAFemaleCount === 2 && teamBMaleCount === 2) ||
+    (teamAMaleCount === 2 && teamBFemaleCount === 2) ||
+    (teamAFemaleCount === 2 && teamBMaleCount === 1 && teamBFemaleCount === 1) ||
+    (teamBFemaleCount === 2 && teamAMaleCount === 1 && teamAFemaleCount === 1);
+
+  return isGenderMismatch ? 25 : 8;
 }
 
 function cloneStats(players: Player[]): MutableState {
@@ -144,14 +179,25 @@ function scoreDoublesTeams(
         (opponentHistory[makePairKey(option.teamA[1].id, option.teamB[0].id)] ?? 0) +
         (opponentHistory[makePairKey(option.teamA[1].id, option.teamB[1].id)] ?? 0);
 
-      const teamASkill = option.teamA.reduce((sum, player) => sum + skillScore(player.skillLevel), 0);
-      const teamBSkill = option.teamB.reduce((sum, player) => sum + skillScore(player.skillLevel), 0);
-      const skillPenalty = Math.abs(teamASkill - teamBSkill) * 2;
-      const genderPenalty = mixedTeamPenalty(option.teamA) + mixedTeamPenalty(option.teamB);
+      const teamASkill = option.teamA.reduce((sum, player) => sum + effectiveSkillScore(player), 0);
+      const teamBSkill = option.teamB.reduce((sum, player) => sum + effectiveSkillScore(player), 0);
+      const teamSkillDiff = Math.abs(teamASkill - teamBSkill);
+      const thresholdPenalty = teamSkillDiff > 1.25 ? 40 : 0;
+      const skillPenalty = teamSkillDiff * 7;
+      const genderPenalty =
+        mixedTeamPenalty(option.teamA) +
+        mixedTeamPenalty(option.teamB) +
+        matchupGenderPenalty(option.teamA, option.teamB);
 
       return {
         ...option,
-        score: teammateRepeats * 12 + opponentRepeats * 4 + skillPenalty + genderPenalty + randomBias(),
+        score:
+          teammateRepeats * 12 +
+          opponentRepeats * 4 +
+          skillPenalty +
+          thresholdPenalty +
+          genderPenalty +
+          randomBias(),
       };
     })
     .sort((left, right) => left.score - right.score)[0];
