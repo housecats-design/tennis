@@ -36,6 +36,14 @@ type EventRow = {
   updated_at: string | null;
 };
 
+function formatSupabaseError(error: { code?: string; message?: string } | null): Error {
+  if (error?.code === "PGRST205") {
+    return new Error("Supabase events 테이블이 없습니다. supabase/schema.sql을 먼저 적용해 주세요.");
+  }
+
+  return new Error(error?.message ?? "Supabase 요청에 실패했습니다.");
+}
+
 function makeId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -140,7 +148,7 @@ async function persistEvent(event: EventRecord): Promise<void> {
   );
 
   if (error) {
-    throw error;
+    throw formatSupabaseError(error);
   }
 }
 
@@ -160,6 +168,9 @@ async function loadEventsFromSource(): Promise<EventRecord[]> {
     .order("created_at", { ascending: false });
 
   if (error || !data) {
+    if (error?.code === "PGRST205") {
+      return loadCachedEvents();
+    }
     return loadCachedEvents();
   }
 
@@ -294,6 +305,9 @@ export async function loadEvent(eventId: string): Promise<EventRecord | null> {
     .maybeSingle();
 
   if (error || !data) {
+    if (error?.code === "PGRST205") {
+      return loadCachedEvents().find((event) => event.id === eventId) ?? null;
+    }
     return loadCachedEvents().find((event) => event.id === eventId) ?? null;
   }
 
