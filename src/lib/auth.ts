@@ -7,6 +7,16 @@ export type HostIdentity = {
   email?: string | null;
 };
 
+export function getAppUrl(): string {
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const windowOrigin = typeof window !== "undefined" ? window.location.origin : "";
+
+  return (
+    configuredAppUrl ||
+    (windowOrigin && !windowOrigin.includes("localhost") ? windowOrigin : DEFAULT_APP_URL)
+  );
+}
+
 export async function getHostIdentity(): Promise<HostIdentity | null> {
   if (!isSupabaseEnabled()) {
     return null;
@@ -35,18 +45,15 @@ export async function signInHost(email: string): Promise<void> {
     throw new Error("Supabase 환경 변수가 설정되지 않았습니다.");
   }
 
-  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  const windowOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  const appUrl =
-    configuredAppUrl ||
-    (windowOrigin && !windowOrigin.includes("localhost") ? windowOrigin : DEFAULT_APP_URL);
+  const appUrl = getAppUrl();
+  const redirectUrl = `${appUrl}/auth/callback?next=/host`;
 
-  console.debug("[auth] signInHost redirect", { appUrl, configuredAppUrl, windowOrigin });
+  console.debug("[auth] signInHost redirect", { appUrl, redirectUrl });
 
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${appUrl}/host`,
+      emailRedirectTo: redirectUrl,
     },
   });
 
