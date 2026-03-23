@@ -1,5 +1,5 @@
 import { calculateStats } from "@/lib/stats";
-import { Match, MatchType, Player, PlayerStats, Round, ScheduleRequest, ScheduleResponse } from "@/lib/types";
+import { Match, MatchType, Player, PlayerStats, Round, ScheduleRequest, ScheduleResponse, SkillLevel } from "@/lib/types";
 
 type MutableState = Record<string, PlayerStats>;
 type PairHistory = Record<string, number>;
@@ -10,6 +10,21 @@ function makePairKey(a: string, b: string): string {
 
 function randomBias(): number {
   return Math.random() * 0.35;
+}
+
+function skillScore(level?: SkillLevel): number {
+  if (level === "high") {
+    return 3;
+  }
+  if (level === "low") {
+    return 1;
+  }
+  return 2;
+}
+
+function mixedTeamPenalty(team: Player[]): number {
+  const genders = new Set(team.map((player) => player.gender).filter(Boolean));
+  return genders.has("male") && genders.has("female") ? 0 : 6;
 }
 
 function cloneStats(players: Player[]): MutableState {
@@ -96,6 +111,7 @@ function buildSinglesMatches(
       scoreA: null,
       scoreB: null,
       isTieBreak: false,
+      skipped: false,
     });
     court += 1;
   }
@@ -128,9 +144,14 @@ function scoreDoublesTeams(
         (opponentHistory[makePairKey(option.teamA[1].id, option.teamB[0].id)] ?? 0) +
         (opponentHistory[makePairKey(option.teamA[1].id, option.teamB[1].id)] ?? 0);
 
+      const teamASkill = option.teamA.reduce((sum, player) => sum + skillScore(player.skillLevel), 0);
+      const teamBSkill = option.teamB.reduce((sum, player) => sum + skillScore(player.skillLevel), 0);
+      const skillPenalty = Math.abs(teamASkill - teamBSkill) * 2;
+      const genderPenalty = mixedTeamPenalty(option.teamA) + mixedTeamPenalty(option.teamB);
+
       return {
         ...option,
-        score: teammateRepeats * 12 + opponentRepeats * 4 + randomBias(),
+        score: teammateRepeats * 12 + opponentRepeats * 4 + skillPenalty + genderPenalty + randomBias(),
       };
     })
     .sort((left, right) => left.score - right.score)[0];
@@ -161,6 +182,7 @@ function buildDoublesMatches(
       scoreA: null,
       scoreB: null,
       isTieBreak: false,
+      skipped: false,
     });
     court += 1;
   }
@@ -170,6 +192,10 @@ function buildDoublesMatches(
 
 function markRoundUsage(round: Round, stats: MutableState): void {
   for (const match of round.matches) {
+    if (match.skipped) {
+      continue;
+    }
+
     for (const player of [...match.teamA, ...match.teamB]) {
       stats[player.id].games += 1;
     }
@@ -187,6 +213,10 @@ function updateHistories(
   opponentHistory: PairHistory,
 ): void {
   for (const match of round.matches) {
+    if (match.skipped) {
+      continue;
+    }
+
     if (matchType === "singles") {
       const key = makePairKey(match.teamA[0].id, match.teamB[0].id);
       opponentHistory[key] = (opponentHistory[key] ?? 0) + 1;
@@ -264,4 +294,13 @@ export function generateSchedule(input: ScheduleRequest): ScheduleResponse {
     rounds,
     stats: calculateStats(rounds),
   };
+}
+
+export function rebuildRoundMatches(matchType: MatchType, players: Player[], courtCount: number): Match[] {
+  const stats = cloneStats(players);
+  if (matchType === "singles") {
+    return buildSinglesMatches(players.slice(0, courtCount * 2), stats, {});
+  }
+
+  return buildDoublesMatches(players.slice(0, courtCount * 4), {}, {});
 }

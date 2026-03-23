@@ -67,6 +67,10 @@ export function accumulateRoundStats(
   }
 
   for (const match of round.matches) {
+    if (match.skipped) {
+      continue;
+    }
+
     const scoreA = match.scoreA;
     const scoreB = match.scoreB;
     if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB)) {

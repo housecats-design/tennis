@@ -12,6 +12,8 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "@supabase/supabase-js": "^2.49.8",
+    "qrcode.react": "^4.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

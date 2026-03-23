@@ -40,14 +40,6 @@ export const generateScheduleSchema = z
           message: "Doubles requires at least four players.",
         });
       }
-
-      if (value.players.length % 2 !== 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["players"],
-          message: "Doubles requires an even number of players.",
-        });
-      }
     }
   });
 
