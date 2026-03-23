@@ -7,16 +7,22 @@ import { useEffect, useState } from "react";
 
 export default function HostRoundsPage() {
   const params = useParams<{ id: string }>();
-  const eventId = params.id;
+  const eventId = typeof params.id === "string" ? params.id : "";
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!eventId) {
+      setLoading(false);
       return;
     }
 
     const refresh = async () => {
-      setEvent(await loadEvent(eventId));
+      try {
+        setEvent(await loadEvent(eventId));
+      } finally {
+        setLoading(false);
+      }
     };
 
     void refresh();
@@ -27,6 +33,16 @@ export default function HostRoundsPage() {
       unsubscribe();
     };
   }, [eventId]);
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+        <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
+          <h1 className="text-3xl font-black">전체 라운드를 불러오는 중입니다.</h1>
+        </div>
+      </main>
+    );
+  }
 
   if (!event) {
     return (

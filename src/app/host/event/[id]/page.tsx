@@ -26,6 +26,7 @@ export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const eventId = typeof params.id === "string" ? params.id : "";
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState<Participant["gender"]>("male");
@@ -34,6 +35,7 @@ export default function HostEventPage() {
   useEffect(() => {
     if (!eventId) {
       setError("유효하지 않은 이벤트 주소입니다.");
+      setLoading(false);
       return;
     }
 
@@ -41,9 +43,12 @@ export default function HostEventPage() {
       try {
         const nextEvent = await loadEvent(eventId);
         setEvent(nextEvent);
+        setError(null);
       } catch (error) {
         console.error("[host-event] refresh failed", error);
         setError(error instanceof Error ? error.message : "이벤트를 불러오지 못했습니다.");
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -77,7 +82,12 @@ export default function HostEventPage() {
       return;
     }
 
-    setEvent(await loadEvent(eventId));
+    setLoading(true);
+    try {
+      setEvent(await loadEvent(eventId));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleParticipantChange(participantId: string, field: "displayName" | "gender" | "skillLevel", value: string): Promise<void> {
@@ -202,11 +212,23 @@ export default function HostEventPage() {
     setEvent(nextEvent);
   }
 
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+        <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
+          <h1 className="text-3xl font-black">이벤트를 불러오는 중입니다.</h1>
+          <p className="mt-3 text-sm text-ink/70">잠시만 기다려 주세요.</p>
+        </div>
+      </main>
+    );
+  }
+
   if (!event) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
           <h1 className="text-3xl font-black">이벤트를 찾을 수 없습니다.</h1>
+          {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
           <Link href="/host" className="mt-6 inline-flex rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white">
             호스트 페이지로 이동
           </Link>
