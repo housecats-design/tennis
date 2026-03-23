@@ -1,6 +1,7 @@
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 
 const DEFAULT_APP_URL = "https://tennis-match-scheduler-nu.vercel.app";
+const DEFAULT_AUTH_REDIRECT_URL = `${DEFAULT_APP_URL}/auth/callback?next=/host`;
 
 export type HostIdentity = {
   id: string;
@@ -46,7 +47,7 @@ export async function signInHost(email: string): Promise<void> {
   }
 
   const appUrl = getAppUrl();
-  const redirectUrl = `${appUrl}/auth/callback?next=/host`;
+  const redirectUrl = DEFAULT_AUTH_REDIRECT_URL;
 
   console.debug("[auth] signInHost redirect", { appUrl, redirectUrl });
 
