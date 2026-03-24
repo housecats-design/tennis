@@ -60,7 +60,16 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
     return null;
   }
 
-  return getProfileById(identity.id);
+  const current = await getProfileById(identity.id);
+  if (current) {
+    return current;
+  }
+
+  return ensureUserProfile({
+    identity,
+    loginId: identity.email.split("@")[0],
+    displayName: identity.email.split("@")[0],
+  });
 }
 
 export async function signUpAccount(input: {
