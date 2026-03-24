@@ -45,14 +45,14 @@ function AuthCallbackContent() {
   }, [router, searchParams]);
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
+    <main className="poster-page max-w-3xl">
+      <div className="border-t border-line py-8 text-center">
         <h1 className="text-3xl font-black">로그인 처리 중입니다.</h1>
         <p className="mt-3 text-sm text-ink/70">
           잠시만 기다려 주세요. 인증이 끝나면 자동으로 이동합니다.
         </p>
         {error ? (
-          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mt-4 border-l-2 border-red-300 pl-4 text-sm text-red-700">
             {error}
             <div className="mt-2 text-xs text-ink/70">{getAppUrl()}/host 로 직접 접속해 다시 시도할 수 있습니다.</div>
           </div>
@@ -64,7 +64,7 @@ function AuthCallbackContent() {
 
 export default function AuthCallbackPage() {
   return (
-    <Suspense fallback={<main className="mx-auto max-w-3xl px-4 py-10 text-sm text-ink/70">인증 정보를 확인하는 중...</main>}>
+    <Suspense fallback={<main className="poster-page max-w-3xl text-sm text-ink/70">인증 정보를 확인하는 중...</main>}>
       <AuthCallbackContent />
     </Suspense>
   );

@@ -22,6 +22,11 @@ function isTieBreak(scoreA: number | null | undefined, scoreB: number | null | u
   return (scoreA === 6 && scoreB === 5) || (scoreA === 5 && scoreB === 6);
 }
 
+function getRoundAccentClass(roundNumber: number): string {
+  const accents = ["round-poster-1", "round-poster-2", "round-poster-3", "round-poster-4"];
+  return accents[(roundNumber - 1) % accents.length];
+}
+
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const eventId = typeof params.id === "string" ? params.id : "";
@@ -253,8 +258,8 @@ export default function HostEventPage() {
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
+      <main className="poster-page max-w-3xl">
+        <div className="border-t border-line py-8 text-center">
           <h1 className="text-3xl font-black">이벤트를 불러오는 중입니다.</h1>
           <p className="mt-3 text-sm text-ink/70">잠시만 기다려 주세요.</p>
         </div>
@@ -264,11 +269,11 @@ export default function HostEventPage() {
 
   if (!event) {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <div className="rounded-3xl border border-line bg-white/90 p-8 text-center shadow-panel">
+      <main className="poster-page max-w-3xl">
+        <div className="border-t border-line py-8 text-center">
           <h1 className="text-3xl font-black">이벤트를 찾을 수 없습니다.</h1>
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
-          <Link href="/host" className="mt-6 inline-flex rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white">
+          <Link href="/host" className="poster-button mt-6">
             호스트 페이지로 이동
           </Link>
         </div>
@@ -277,35 +282,35 @@ export default function HostEventPage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-line bg-white/90 p-6 shadow-panel lg:flex-row lg:items-end lg:justify-between">
+    <main className="poster-page">
+      <div className="mb-8 flex flex-col gap-5 border-t border-line py-8 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-accent">{event.code}</p>
-          <h1 className="mt-2 text-3xl font-black">{event.eventName}</h1>
-          <p className="mt-2 text-sm text-ink/70">
+          <p className="poster-label">{event.code}</p>
+          <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">{event.eventName}</h1>
+          <p className="mt-4 text-sm text-ink/68">
             {event.matchType === "singles" ? "단식" : "복식"} / 코트 {event.courtCount}개 / 라운드 {event.roundCount}개 / 보기 모드 {event.roundViewMode}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={refreshEvent} className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold">
+          <button type="button" onClick={refreshEvent} className="poster-button-secondary">
             새로고침
           </button>
-          <Link href={`/host/event/${event.id}/rounds`} className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold">
+          <Link href={`/host/event/${event.id}/rounds`} className="poster-button-secondary">
             라운드 전체보기
           </Link>
-          <Link href={`/event/${event.id}/leaderboard`} className="rounded-2xl bg-accentStrong px-4 py-3 text-sm font-semibold text-white">
+          <Link href={`/event/${event.id}/leaderboard`} className="poster-button">
             리더보드
           </Link>
-          <Link href="/host" className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold">
+          <Link href="/host" className="poster-button-secondary">
             새 이벤트
           </Link>
         </div>
       </div>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <aside className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
-          <div className="mb-6 rounded-2xl border border-line bg-surface p-4">
+        <aside className="border-t border-line py-6">
+          <div className="mb-8 border-b border-line pb-6">
             <div className="mb-3 text-sm font-semibold text-ink/70">QR 참여 링크</div>
             <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
               <QRCodeSVG value={joinUrl} size={120} />
@@ -322,31 +327,31 @@ export default function HostEventPage() {
 
           <div className="space-y-3">
             {event.participants.map((participant) => (
-              <div key={participant.id} className="grid gap-3 rounded-2xl border border-line bg-surface p-3 sm:grid-cols-[1fr_110px_110px_140px_auto]">
+              <div key={participant.id} className="grid gap-3 border-b border-line py-3 sm:grid-cols-[1fr_110px_110px_140px_auto]">
                 <input
                   value={participant.displayName}
                   onChange={(event) => handleParticipantChange(participant.id, "displayName", event.target.value)}
                   disabled={!participantsEditable}
-                  className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+                  className="poster-input"
                 />
                 <select
                   value={participant.gender}
                   onChange={(event) => handleParticipantChange(participant.id, "gender", event.target.value)}
                   disabled={!participantsEditable}
-                  className="rounded-2xl border border-line bg-white px-3 py-3 text-sm outline-none focus:border-accent"
+                  className="poster-input"
                 >
                   <option value="male">남성</option>
                   <option value="female">여성</option>
                   <option value="unspecified">미정</option>
                 </select>
-                <div className="rounded-2xl border border-line bg-white px-3 py-3 text-sm text-ink/70">
+                <div className="border-b border-line py-3 text-sm text-ink/70">
                   NTRP {typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}
                 </div>
                 <select
                   value={participant.hostSkillOverride ?? ""}
                   onChange={(event) => handleParticipantChange(participant.id, "hostSkillOverride", event.target.value)}
                   disabled={!participantsEditable}
-                  className="rounded-2xl border border-line bg-white px-3 py-3 text-sm outline-none focus:border-accent"
+                  className="poster-input"
                 >
                   <option value="">자동</option>
                   <option value="high">상</option>
@@ -357,7 +362,7 @@ export default function HostEventPage() {
                   type="button"
                   onClick={() => handleRemoveParticipant(participant.id)}
                   disabled={!participantsEditable}
-                  className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
+                  className="border-b border-red-200 py-3 text-sm font-semibold text-red-700"
                 >
                   삭제
                 </button>
@@ -371,13 +376,13 @@ export default function HostEventPage() {
               onChange={(event) => setNewPlayerName(event.target.value)}
               placeholder="추가할 참가자 이름"
               disabled={!participantsEditable}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm outline-none focus:border-accent"
+              className="poster-input"
             />
             <select
               value={newPlayerGender}
               onChange={(event) => setNewPlayerGender(event.target.value as Participant["gender"])}
               disabled={!participantsEditable}
-              className="rounded-2xl border border-line bg-surface px-3 py-3 text-sm outline-none focus:border-accent"
+              className="poster-input"
             >
               <option value="male">남성</option>
               <option value="female">여성</option>
@@ -387,7 +392,7 @@ export default function HostEventPage() {
               value={newPlayerSkill}
               onChange={(event) => setNewPlayerSkill(event.target.value as SkillLevel)}
               disabled={!participantsEditable}
-              className="rounded-2xl border border-line bg-surface px-3 py-3 text-sm outline-none focus:border-accent"
+              className="poster-input"
             >
               <option value="high">상</option>
               <option value="medium">중</option>
@@ -397,7 +402,7 @@ export default function HostEventPage() {
               type="button"
               onClick={handleAddParticipant}
               disabled={!participantsEditable}
-              className="rounded-2xl bg-accentStrong px-4 py-3 text-sm font-bold text-white"
+              className="poster-button"
             >
               추가
             </button>
@@ -413,7 +418,7 @@ export default function HostEventPage() {
             type="button"
             onClick={handleGenerateSchedule}
             disabled={!participantsEditable}
-            className="mt-4 inline-flex rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white"
+            className="poster-button mt-4"
           >
             대진 생성
           </button>
@@ -426,14 +431,14 @@ export default function HostEventPage() {
         </aside>
 
         <div className="grid gap-6">
-          <section className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+          <section className="border-t border-line py-6">
             <h2 className="text-2xl font-black">누적 통계</h2>
             <div className="mt-4 space-y-3">
               {sortedParticipants.map((participant) => {
                 const stats: PlayerStats = event.stats[participant.id];
                 const plan = scheduledSummary[participant.id] ?? { scheduledGames: 0, scheduledRests: 0 };
                 return (
-                  <div key={participant.id} className="rounded-2xl border border-line bg-surface p-4">
+                  <div key={participant.id} className="border-b border-line py-4">
                     <div className="font-bold">{participant.name}</div>
                     <div className="mt-2 grid grid-cols-4 gap-2 text-xs text-ink/70">
                       <span>Games {stats?.games ?? 0}</span>
@@ -451,11 +456,11 @@ export default function HostEventPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+          <section className="border-t border-line py-6">
             <h2 className="text-2xl font-black">현재 이동 안내</h2>
             <div className="mt-4 space-y-3">
               {instructions.map((instruction) => (
-                <div key={instruction.participantId} className="rounded-2xl border border-line bg-surface p-4">
+                <div key={instruction.participantId} className="border-b border-line py-3">
                   <div className="font-semibold">{instruction.name}</div>
                   <div className="mt-1 text-sm text-ink/70">{instruction.instruction}</div>
                 </div>
@@ -464,11 +469,11 @@ export default function HostEventPage() {
           </section>
 
           {disputeNotifications.length > 0 ? (
-            <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-panel">
+            <section className="border-t border-red-200 py-6">
               <h2 className="text-2xl font-black text-red-800">점수 이의신청</h2>
               <div className="mt-4 space-y-3">
                 {disputeNotifications.map((notification) => (
-                  <div key={notification.id} className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-700">
+                  <div key={notification.id} className="border-b border-red-200 py-3 text-sm text-red-700">
                     {notification.message}
                   </div>
                 ))}
@@ -477,26 +482,21 @@ export default function HostEventPage() {
           ) : null}
 
           {event.rounds.length > 0 ? event.rounds.map((round) => (
-            <article key={round.id ?? round.roundNumber} className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+            <article key={round.id ?? round.roundNumber} className={`border-t border-line py-6 pl-4 ${getRoundAccentClass(round.roundNumber)}`}>
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-2xl font-black">Round {round.roundNumber}</h2>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${round.completed ? "bg-accentStrong text-white" : "bg-amber-100 text-amber-800"}`}>
+                <h2 className="text-3xl font-black tracking-[-0.03em]">ROUND {round.roundNumber}</h2>
+                <span className={`text-xs font-semibold uppercase tracking-[0.2em] ${round.completed ? "text-accentStrong" : "text-amber-700"}`}>
                   {round.completed ? "완료" : "진행 중"}
                 </span>
               </div>
 
               <div className="grid gap-4">
                 {round.matches.map((match) => (
-                  <div key={match.id ?? `${round.roundNumber}-${match.court}`} className="rounded-2xl border border-line bg-surface p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Court {match.court}</p>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-                      <div className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold">
-                        {match.teamA.map((player) => player.name).join(" / ")}
-                      </div>
-                      <div className="text-center text-sm font-black text-ink/55">VS</div>
-                      <div className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold">
-                        {match.teamB.map((player) => player.name).join(" / ")}
-                      </div>
+                  <div key={match.id ?? `${round.roundNumber}-${match.court}`} className="border-t border-line py-4">
+                    <p className="poster-label">Court {match.court}</p>
+                    <div className="mt-3 grid gap-2 text-sm">
+                      <div><span className="mr-3 inline-block w-4 font-bold text-accentStrong">A</span>{match.teamA.map((player) => player.name).join(" / ")}</div>
+                      <div><span className="mr-3 inline-block w-4 font-bold text-ink/75">B</span>{match.teamB.map((player) => player.name).join(" / ")}</div>
                     </div>
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <input
@@ -505,7 +505,7 @@ export default function HostEventPage() {
                         value={match.scoreA ?? ""}
                         disabled={round.completed}
                         onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreA", event.target.value)}
-                        className="rounded-2xl border border-line bg-white px-4 py-3 outline-none focus:border-accent disabled:bg-slate-100"
+                        className="poster-input disabled:bg-slate-100"
                       />
                       <input
                         type="number"
@@ -513,7 +513,7 @@ export default function HostEventPage() {
                         value={match.scoreB ?? ""}
                         disabled={round.completed}
                         onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreB", event.target.value)}
-                        className="rounded-2xl border border-line bg-white px-4 py-3 outline-none focus:border-accent disabled:bg-slate-100"
+                        className="poster-input disabled:bg-slate-100"
                       />
                     </div>
                     {match.scoreProposal ? (
@@ -531,7 +531,7 @@ export default function HostEventPage() {
                         type="button"
                         onClick={() => handleSkipMatch(round.roundNumber, match.id ?? "")}
                         disabled={round.completed}
-                        className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
+                        className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
                       >
                         {match.skipped ? "건너뛰기 취소" : "경기 건너뛰기"}
                       </button>
@@ -539,27 +539,27 @@ export default function HostEventPage() {
                         type="button"
                         onClick={() => handleReassignRound(round.roundNumber)}
                         disabled={round.completed}
-                        className="rounded-2xl border border-line bg-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                        className="border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50"
                       >
                         이후 라운드 재배정
                       </button>
                     </div>
                     {match.skipped ? (
                       <div className="mt-3">
-                        <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">건너뜀</span>
+                        <span className="text-xs font-bold uppercase tracking-[0.18em] text-red-700">건너뜀</span>
                       </div>
                     ) : null}
                     {isTieBreak(match.scoreA, match.scoreB) ? (
                       <div className="mt-3">
-                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">타이</span>
+                        <span className="text-xs font-bold uppercase tracking-[0.18em] text-amber-800">타이</span>
                       </div>
                     ) : null}
                   </div>
                 ))}
               </div>
 
-              <div className="mt-5 rounded-2xl border border-dashed border-line bg-white px-4 py-3 text-sm text-ink/75">
-                <span className="font-semibold text-ink">Rest Players:</span>{" "}
+              <div className="mt-5 border-t border-dashed border-line pt-4 text-sm text-ink/75">
+                <span className="font-semibold text-ink">REST</span>{" "}
                 {round.restPlayers.length > 0 ? round.restPlayers.map((player) => player.name).join(", ") : "없음"}
               </div>
 
@@ -568,14 +568,14 @@ export default function HostEventPage() {
                   <button
                     type="button"
                     onClick={() => handleFinalizeRound(round.roundNumber)}
-                    className="rounded-2xl bg-accentStrong px-4 py-3 text-sm font-bold text-white"
+                    className="poster-button"
                   >
                     점수 올리기
                   </button>
                   <button
                     type="button"
                     onClick={() => handleReassignRound(round.roundNumber)}
-                    className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold"
+                    className="poster-button-secondary"
                   >
                     라운드 재배정
                   </button>
@@ -583,9 +583,9 @@ export default function HostEventPage() {
               ) : null}
             </article>
           )) : (
-            <section className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+            <section className="border-t border-line py-6">
               <h2 className="text-2xl font-black">대진 전 대기</h2>
-              <p className="mt-3 text-sm text-ink/70">
+              <p className="mt-3 text-sm text-ink/68">
                 참가자 목록을 정리한 뒤 `대진 생성`을 눌러 라운드를 시작하세요.
               </p>
             </section>

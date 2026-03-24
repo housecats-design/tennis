@@ -156,6 +156,7 @@ export default function GuestEventPage() {
   const opponentTeam = currentMatch ? (isParticipantInTeamA ? currentMatch.teamB : currentMatch.teamA) : [];
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
+  const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
 
   async function handleSubmitProposal(): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
@@ -205,16 +206,16 @@ export default function GuestEventPage() {
   }
 
   if (loading) {
-    return <main className="mx-auto max-w-4xl px-4 py-10 text-sm text-ink/70">게스트 이벤트를 불러오는 중...</main>;
+    return <main className="poster-page max-w-4xl text-sm text-ink/70">게스트 이벤트를 불러오는 중...</main>;
   }
 
   if (error) {
     return (
-      <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+      <main className="poster-page max-w-4xl">
+        <div className="border-t border-red-200 py-6 text-sm text-red-700">
           <div className="font-bold">게스트 화면을 불러오지 못했습니다.</div>
           <div className="mt-2">{error}</div>
-          <Link href="/guest" className="mt-4 inline-flex rounded-2xl bg-white px-4 py-3 font-semibold text-ink">
+          <Link href="/guest" className="poster-button-secondary mt-4">
             게스트 페이지로 돌아가기
           </Link>
         </div>
@@ -223,27 +224,28 @@ export default function GuestEventPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
+    <main className="poster-page max-w-4xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        <Link href="/guest" className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold">
+        <Link href="/guest" className="poster-button-secondary">
           다른 이벤트 참여
         </Link>
         {eventId ? (
-          <Link href={`/event/${eventId}/leaderboard`} className="rounded-2xl bg-accentStrong px-4 py-3 text-sm font-semibold text-white">
+          <Link href={`/event/${eventId}/leaderboard`} className="poster-button">
             리더보드
           </Link>
         ) : null}
       </div>
 
-      <section className="rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
-        <h1 className="text-3xl font-black">{assignment.title}</h1>
-        <p className="mt-3 text-sm text-ink/75">{assignment.body}</p>
+      <section className="border-t border-line py-6">
+        <p className="poster-label">Player Status</p>
+        <h1 className="mt-3 text-4xl font-black tracking-[-0.04em]">{assignment.title}</h1>
+        <p className="mt-4 text-sm leading-6 text-ink/72">{assignment.body}</p>
         {participantMeta && currentEvent && participantId ? (
-          <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-sm text-ink/75">
+          <div className="mt-5 grid gap-2 border-t border-line pt-4 text-sm text-ink/75 sm:grid-cols-3">
             <div>이름: {participantMeta.name}</div>
             <div>성별: {participantMeta.gender}</div>
             <div>NTRP: {participantMeta.ntrp}</div>
-            <div className="mt-2 font-semibold text-ink">{getParticipantInstruction(currentEvent, participantId)}</div>
+            <div className="sm:col-span-3 mt-2 font-semibold text-ink">{getParticipantInstruction(currentEvent, participantId)}</div>
           </div>
         ) : null}
         {participantId && eventId ? (
@@ -254,9 +256,9 @@ export default function GuestEventPage() {
       </section>
 
       {currentMatch && participantId ? (
-        <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
-          <h2 className="text-2xl font-black">현재 경기</h2>
-          <div className="mt-4 grid gap-3 rounded-2xl border border-line bg-surface p-4">
+        <section className="mt-6 border-t border-line py-6">
+          <h2 className="text-3xl font-black tracking-[-0.03em]">현재 경기</h2>
+          <div className="mt-5 grid gap-4">
             {currentEvent?.matchType === "singles" ? (
               <>
                 <div className="text-sm font-semibold">내 선수: {ownTeam.map((player) => player.name).join(" / ")}</div>
@@ -269,7 +271,7 @@ export default function GuestEventPage() {
               </>
             )}
             <div className="text-sm text-ink/70">코트 {currentMatch.court}</div>
-            <div className="grid gap-2 rounded-2xl border border-line bg-white p-4 text-sm">
+            <div className="grid gap-3 border-y border-line py-4 text-sm">
               <div><span className="font-semibold">{teamALabel}:</span> {currentMatch.teamA.map((player) => player.name).join(" / ")}</div>
               <div><span className="font-semibold">{teamBLabel}:</span> {currentMatch.teamB.map((player) => player.name).join(" / ")}</div>
             </div>
@@ -279,33 +281,33 @@ export default function GuestEventPage() {
                 value={scoreDraft.scoreA}
                 onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
                 placeholder={`${teamALabel} 점수`}
-                className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+                className="poster-input"
               />
               <input
                 value={scoreDraft.scoreB}
                 onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
                 placeholder={`${teamBLabel} 점수`}
-                className="rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+                className="poster-input"
               />
             </div>
             <button
               type="button"
               onClick={() => void handleSubmitProposal()}
-              className="inline-flex w-fit rounded-2xl bg-accentStrong px-4 py-3 text-sm font-bold text-white"
+              className="poster-button w-fit"
             >
               점수 제출
             </button>
 
             {currentMatch.scoreProposal ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">
                 <div className="font-semibold">이 점수가 맞습니까?</div>
                 <div className="mt-2">{teamALabel} {currentMatch.scoreProposal.scoreA} : {teamBLabel} {currentMatch.scoreProposal.scoreB}</div>
                 {currentMatch.scoreProposal.submittedByParticipantId !== participantId ? (
                   <div className="mt-3 flex gap-3">
-                    <button type="button" onClick={() => void handleProposalResponse("accept")} className="rounded-2xl bg-white px-4 py-2 font-semibold">
+                    <button type="button" onClick={() => void handleProposalResponse("accept")} className="poster-button-secondary">
                       수락
                     </button>
-                    <button type="button" onClick={() => void handleProposalResponse("dispute")} className="rounded-2xl bg-white px-4 py-2 font-semibold text-red-700">
+                    <button type="button" onClick={() => void handleProposalResponse("dispute")} className="border border-red-200 px-4 py-3 font-semibold text-red-700">
                       이의신청
                     </button>
                   </div>
@@ -319,41 +321,53 @@ export default function GuestEventPage() {
       ) : null}
 
       {isWaitingPlayer ? (
-        <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
-          <h2 className="text-2xl font-black">대기 화면</h2>
-          <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-sm text-ink/75">
+        <section className="mt-6 border-t border-line py-6">
+          <h2 className="text-3xl font-black tracking-[-0.03em]">대기 화면</h2>
+          <div className="mt-4 text-sm text-ink/75">
             <div>현재 라운드 현황을 실시간으로 보고 있습니다.</div>
             <div className="mt-2 font-semibold">{currentEvent ? getParticipantInstruction(currentEvent, participantId ?? "") : "다음 매치를 기다리는 중입니다."}</div>
-            <div className="mt-4 text-xs text-ink/60">다음 매치가 배정되면 이 화면이 자동으로 경기 화면으로 바뀝니다.</div>
+            <div className="mt-5 border-t border-line pt-4">
+              <div className="poster-label">Current Round Scoreboard</div>
+              <div className="mt-3 space-y-3">
+                {currentRoundMatches.map((match) => (
+                  <div key={match.id ?? `${match.court}`} className="border-b border-line pb-3 text-sm">
+                    <div className="font-semibold">Court {match.court}</div>
+                    <div className="mt-1">A {match.teamA.map((player) => player.name).join(" / ")}</div>
+                    <div>B {match.teamB.map((player) => player.name).join(" / ")}</div>
+                    <div className="mt-1 text-ink/65">{match.scoreA ?? "-"} : {match.scoreB ?? "-"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       ) : null}
 
-      <section className="mt-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+      <section className="mt-6 border-t border-line py-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-2xl font-black">알림</h2>
-          <span className="rounded-full bg-surface px-3 py-1 text-xs font-semibold text-ink/60">
+          <h2 className="text-3xl font-black tracking-[-0.03em]">알림</h2>
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/55">
             {notifications.length}개
           </span>
         </div>
 
         <div className="space-y-3">
           {notifications.length > 0 ? notifications.map((notification) => (
-            <div key={notification.id} className="rounded-2xl border border-line bg-surface p-4">
+            <div key={notification.id} className="border-b border-line py-3">
               <div className="text-sm font-semibold">[{formatNotificationTime(notification.createdAt)}] {notification.message}</div>
               <div className="mt-2 text-xs text-ink/55">Round {notification.roundNumber}</div>
               {!notification.readAt ? (
                 <button
                   type="button"
                   onClick={() => handleRead(notification.id)}
-                  className="mt-3 rounded-2xl border border-line bg-white px-3 py-2 text-xs font-semibold"
+                  className="mt-3 border-b border-line pb-1 text-xs font-semibold"
                 >
                   읽음 처리
                 </button>
               ) : null}
             </div>
           )) : (
-            <div className="rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink/70">
+            <div className="border-b border-dashed border-line py-4 text-sm text-ink/70">
               아직 도착한 알림이 없습니다.
             </div>
           )}

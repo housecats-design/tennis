@@ -45,35 +45,38 @@ export default function EventLeaderboardPage() {
   const matchHistory = useMemo(() => (event ? buildMatchHistory(event.rounds) : []), [event]);
 
   if (!event) {
-    return <main className="mx-auto max-w-3xl px-4 py-10 text-sm text-ink/70">이벤트가 없습니다.</main>;
+    return <main className="poster-page max-w-3xl text-sm text-ink/70">이벤트가 없습니다.</main>;
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+    <main className="poster-page max-w-6xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        <Link href={`/host/event/${event.id}`} className="rounded-2xl bg-accentStrong px-4 py-3 text-sm font-semibold text-white">
+        <Link href={`/host/event/${event.id}`} className="poster-button">
           호스트 대시보드
         </Link>
-        <button type="button" onClick={() => setSortDirection((current) => (current === "asc" ? "desc" : "asc"))} className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold">
+        <button type="button" onClick={() => setSortDirection((current) => (current === "asc" ? "desc" : "asc"))} className="poster-button-secondary">
           승수 정렬 전환
         </button>
       </div>
 
-      <section className="rounded-3xl border border-line bg-white/90 p-4 shadow-panel sm:p-6">
+      <section className="border-t border-line py-6">
+        <div className="mb-4">
+          <p className="poster-label">Leaderboard</p>
+          <h1 className="mt-2 text-4xl font-black tracking-[-0.04em]">누적 리더보드</h1>
+        </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+          <table className="poster-table min-w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-line text-ink/60">
-                <th className="px-3 py-3 font-semibold">이름</th>
-                <th className="px-3 py-3 font-semibold">성별</th>
-                <th className="px-3 py-3 font-semibold">경기수</th>
-                <th className="px-3 py-3 font-semibold">승</th>
-                <th className="px-3 py-3 font-semibold">패</th>
-                <th className="px-3 py-3 font-semibold">득점</th>
-                <th className="px-3 py-3 font-semibold">실점</th>
-                <th className="px-3 py-3 font-semibold">득실차</th>
-                <th className="px-3 py-3 font-semibold">승률</th>
-                <th className="px-3 py-3 font-semibold">휴식수</th>
+              <tr>
+                <th>이름</th>
+                <th>성별</th>
+                <th>NTRP</th>
+                <th>경기수</th>
+                <th>승</th>
+                <th>패</th>
+                <th>득점</th>
+                <th>실점</th>
+                <th>휴식수</th>
               </tr>
             </thead>
             <tbody>
@@ -82,22 +85,21 @@ export default function EventLeaderboardPage() {
                 const stats = event.stats[player.id];
 
                 return (
-                  <tr key={player.id} className="border-b border-line/60 last:border-b-0">
-                    <td className="px-3 py-4 font-semibold">{player.name}</td>
-                    <td className="px-3 py-4">
+                  <tr key={player.id}>
+                    <td className="font-semibold">{player.name}</td>
+                    <td>
                       {participant?.gender === "male" ? "남성" : participant?.gender === "female" ? "여성" : "미정"}
                     </td>
-                    <td className="px-3 py-4">{stats.games}</td>
-                    <td className="px-3 py-4">{stats.wins}</td>
-                    <td className="px-3 py-4">{stats.losses}</td>
-                    <td className="px-3 py-4">{stats.pointsScored}</td>
-                    <td className="px-3 py-4">{stats.pointsAllowed}</td>
-                    <td className="px-3 py-4">{stats.pointDiff}</td>
-                    <td className="px-3 py-4">{stats.winRate}%</td>
-                    <td className="px-3 py-4">
+                    <td>{typeof participant?.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}</td>
+                    <td>{stats.games}</td>
+                    <td>{stats.wins}</td>
+                    <td>{stats.losses}</td>
+                    <td>{stats.pointsScored}</td>
+                    <td>{stats.pointsAllowed}</td>
+                    <td>
                       <div>{stats.rests}</div>
                       {stats.fairPlayWarning ? (
-                        <div className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-800">
+                        <div className="mt-1 inline-flex text-[11px] font-bold uppercase tracking-[0.18em] text-amber-800">
                           경기수 부족
                         </div>
                       ) : null}
@@ -110,15 +112,15 @@ export default function EventLeaderboardPage() {
         </div>
       </section>
 
-      <section className="mt-6 rounded-3xl border border-line bg-white/90 p-4 shadow-panel sm:p-6">
-        <h2 className="text-2xl font-black">라운드별 경기 이력</h2>
+      <section className="mt-8 border-t border-line py-6">
+        <h2 className="text-3xl font-black tracking-[-0.03em]">라운드별 경기 이력</h2>
         <div className="mt-4 space-y-4">
           {matchHistory.map((round) => (
-            <article key={round.roundNumber} className="rounded-2xl border border-line bg-surface p-4">
+            <article key={round.roundNumber} className="border-b border-line pb-4">
               <div className="font-semibold">Round {round.roundNumber}</div>
               <div className="mt-3 space-y-2 text-sm text-ink/75">
                 {round.matches.map((match, index) => (
-                  <div key={`${round.roundNumber}-${index}`} className="rounded-2xl bg-white px-4 py-3">
+                  <div key={`${round.roundNumber}-${index}`} className="border-b border-line/60 py-3 last:border-b-0">
                     Court {match.court} / {match.teamA.join(" / ")} vs {match.teamB.join(" / ")} / {match.scoreA ?? "-"}:{match.scoreB ?? "-"}
                     {match.skipped ? " / 건너뜀" : ""}
                     {match.disputed ? " / 이의신청" : ""}

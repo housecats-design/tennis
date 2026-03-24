@@ -4,39 +4,31 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl items-center px-4 py-10 sm:px-6 lg:px-8">
-      <section className="grid w-full gap-6 rounded-3xl border border-line bg-white/90 p-8 shadow-panel lg:grid-cols-[1.15fr_0.85fr]">
+    <main className="poster-page flex min-h-screen items-center">
+      <section className="grid w-full gap-10 border-t border-line py-10 lg:grid-cols-[1.2fr_0.8fr]">
         <div>
-          <p className="mb-3 inline-flex rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-accentStrong">
-            Tennis Event System
-          </p>
-          <h1 className="max-w-2xl text-4xl font-black tracking-tight sm:text-5xl">
-            호스트가 이벤트를 만들고, 게스트가 참여하는 테니스 경기 운영 화면
+          <p className="poster-label">Tennis Match Scheduler</p>
+          <h1 className="mt-4 max-w-3xl text-5xl font-black tracking-[-0.04em] text-ink sm:text-6xl">
+            Premium Tennis Event Schedule
           </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-6 text-ink/75 sm:text-base">
-            이벤트 생성, 참가자 관리, 대진 생성, 라운드 진행, 알림, 리더보드까지 한 흐름으로
-            관리할 수 있습니다.
+          <p className="mt-6 max-w-2xl text-base leading-7 text-ink/68">
+            호스트가 이벤트를 만들고, 게스트가 QR 또는 코드로 참여한 뒤 라운드 진행, 점수 확정,
+            이동 안내, 리더보드까지 한 흐름으로 확인하는 테니스 운영 화면입니다.
           </p>
         </div>
 
-        <div className="grid gap-4 self-center">
-          <Link
-            href="/host"
-            className="rounded-3xl border border-accent bg-accentStrong px-6 py-6 text-white shadow-panel transition hover:translate-y-[-1px]"
-          >
-            <div className="text-2xl font-black">호스트</div>
-            <p className="mt-2 text-sm text-white/80">
-              이벤트 생성, 참가자 수정, 대진 생성, 점수 확정
+        <div className="grid content-start gap-0 border-y border-line">
+          <Link href="/host" className="group border-b border-line px-0 py-8">
+            <div className="text-3xl font-black text-accentStrong">호스트</div>
+            <p className="mt-3 text-sm leading-6 text-ink/65">
+              이벤트 생성, 참가자 정리, 전체 라운드 보기, 점수 확정
             </p>
           </Link>
 
-          <Link
-            href="/guest"
-            className="rounded-3xl border border-line bg-surface px-6 py-6 text-ink shadow-panel transition hover:translate-y-[-1px]"
-          >
-            <div className="text-2xl font-black">게스트</div>
-            <p className="mt-2 text-sm text-ink/70">
-              이벤트 참여, 현재 라운드 확인, 코트/휴식 안내 확인
+          <Link href="/guest" className="group px-0 py-8">
+            <div className="text-3xl font-black text-ink">게스트</div>
+            <p className="mt-3 text-sm leading-6 text-ink/65">
+              이벤트 참여, 현재 경기 확인, 코트 이동, 휴식 및 알림 확인
             </p>
           </Link>
         </div>

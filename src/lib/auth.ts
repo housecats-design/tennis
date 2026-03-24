@@ -1,7 +1,6 @@
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 
 const DEFAULT_APP_URL = "https://tennis-match-scheduler-nu.vercel.app";
-const DEFAULT_AUTH_REDIRECT_URL = `${DEFAULT_APP_URL}/auth/callback?next=/host`;
 
 export type HostIdentity = {
   id: string;
@@ -16,6 +15,20 @@ export function getAppUrl(): string {
     configuredAppUrl ||
     (windowOrigin && !windowOrigin.includes("localhost") ? windowOrigin : DEFAULT_APP_URL)
   );
+}
+
+function formatAuthError(error: { message?: string; status?: number } | null): Error {
+  const message = error?.message ?? "";
+
+  if (message.toLowerCase().includes("email rate limit")) {
+    return new Error("로그인 메일 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+  }
+
+  if (message.toLowerCase().includes("smtp") || message.toLowerCase().includes("email")) {
+    return new Error("로그인 메일을 보내지 못했습니다. Supabase SMTP 또는 발신 도메인 설정을 확인해 주세요.");
+  }
+
+  return new Error(message || "로그인 메일 전송에 실패했습니다.");
 }
 
 export async function getHostIdentity(): Promise<HostIdentity | null> {
@@ -46,20 +59,26 @@ export async function signInHost(email: string): Promise<void> {
     throw new Error("Supabase 환경 변수가 설정되지 않았습니다.");
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    throw new Error("올바른 이메일 주소를 입력해 주세요.");
+  }
+
   const appUrl = getAppUrl();
-  const redirectUrl = DEFAULT_AUTH_REDIRECT_URL;
+  const redirectUrl = `${appUrl}/auth/callback?next=/host`;
 
   console.debug("[auth] signInHost redirect", { appUrl, redirectUrl });
 
   const { error } = await supabase.auth.signInWithOtp({
-    email,
+    email: normalizedEmail,
     options: {
       emailRedirectTo: redirectUrl,
+      shouldCreateUser: true,
     },
   });
 
   if (error) {
-    throw error;
+    throw formatAuthError(error);
   }
 }
 

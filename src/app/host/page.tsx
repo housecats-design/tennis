@@ -86,18 +86,19 @@ export default function HostPage() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <h1 className="text-4xl font-black">호스트 이벤트 생성</h1>
-        <p className="mt-3 text-sm text-ink/70">
+    <main className="poster-page max-w-5xl">
+      <div className="border-t border-line py-8">
+        <p className="poster-label">Host Flow</p>
+        <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">호스트 이벤트 생성</h1>
+        <p className="mt-4 max-w-2xl text-sm leading-6 text-ink/68">
           이벤트 이름, 경기 방식, 라운드 공개 방식을 설정한 뒤 참가자를 모아 경기표를 생성합니다.
         </p>
       </div>
 
       {isSupabaseEnabled() && !hostIdentity ? (
-        <form onSubmit={handleLogin} className="mb-6 grid gap-4 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+        <form onSubmit={handleLogin} className="mb-8 grid gap-4 border-t border-line py-6">
           <h2 className="text-2xl font-black">호스트 로그인</h2>
-          <p className="text-sm text-ink/70">
+          <p className="text-sm leading-6 text-ink/68">
             Supabase Auth 매직 링크로 로그인한 뒤 호스트 이벤트를 생성합니다.
           </p>
           <input
@@ -105,33 +106,37 @@ export default function HostPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="host@example.com"
-            className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+            className="poster-input"
           />
           {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-          {info ? <div className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink/75">{info}</div> : null}
-          <button type="submit" className="inline-flex w-fit rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white">
+          {info ? <div className="border-l-2 border-accentStrong pl-4 text-sm text-ink/72">{info}</div> : null}
+          <div className="text-xs leading-5 text-ink/55">
+            메일이 특정 계정에서만 도착한다면, 현재 Supabase SMTP 발신자가 Resend 테스트 주소이거나
+            검증되지 않은 도메인일 가능성이 높습니다.
+          </div>
+          <button type="submit" className="poster-button w-fit">
             로그인 메일 보내기
           </button>
         </form>
       ) : null}
 
       {isSupabaseEnabled() && hostIdentity ? (
-        <div className="mb-6 flex items-center justify-between rounded-3xl border border-line bg-white/90 p-4 shadow-panel">
+        <div className="mb-8 flex items-center justify-between border-t border-line py-4">
           <div className="text-sm text-ink/70">로그인됨: {hostIdentity.email ?? hostIdentity.id}</div>
-          <button type="button" onClick={() => void signOutHost()} className="rounded-2xl border border-line bg-surface px-4 py-2 text-sm font-semibold">
+          <button type="button" onClick={() => void signOutHost()} className="poster-button-secondary">
             로그아웃
           </button>
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit} className="grid gap-6 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+      <form onSubmit={handleSubmit} className="grid gap-8 border-t border-line py-8">
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-semibold">
             이벤트 이름
             <input
               value={eventName}
               onChange={(event) => setEventName(event.target.value)}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
               placeholder="예: 토요일 테니스 모임"
             />
           </label>
@@ -140,7 +145,7 @@ export default function HostPage() {
             <input
               value={hostName}
               onChange={(event) => setHostName(event.target.value)}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
               placeholder="호스트 이름"
             />
           </label>
@@ -152,7 +157,7 @@ export default function HostPage() {
             <select
               value={matchType}
               onChange={(event) => setMatchType(event.target.value as "singles" | "doubles")}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
             >
               <option value="singles">단식</option>
               <option value="doubles">복식</option>
@@ -164,7 +169,7 @@ export default function HostPage() {
             <select
               value={courtCount}
               onChange={(event) => setCourtCount(Number(event.target.value))}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
             >
               {COURT_OPTIONS.map((option) => (
                 <option key={option} value={option}>
@@ -179,7 +184,7 @@ export default function HostPage() {
             <select
               value={roundCount}
               onChange={(event) => setRoundCount(Number(event.target.value))}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
             >
               {ROUND_OPTIONS.map((option) => (
                 <option key={option} value={option}>
@@ -194,7 +199,7 @@ export default function HostPage() {
             <select
               value={roundViewMode}
               onChange={(event) => setRoundViewMode(event.target.value as RoundViewMode)}
-              className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+              className="poster-input"
             >
               <option value="progressive">progressive</option>
               <option value="full">full</option>
@@ -208,10 +213,7 @@ export default function HostPage() {
           </div>
         ) : null}
 
-        <button
-          type="submit"
-          className="inline-flex w-fit rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white"
-        >
+        <button type="submit" className="poster-button w-fit">
           이벤트 만들기
         </button>
       </form>

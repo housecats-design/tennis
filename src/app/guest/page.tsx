@@ -66,21 +66,22 @@ export default function GuestPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <h1 className="text-4xl font-black">게스트 참여</h1>
-        <p className="mt-3 text-sm text-ink/70">
+    <main className="poster-page max-w-4xl">
+      <div className="border-t border-line py-8">
+        <p className="poster-label">Guest Entry</p>
+        <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">게스트 참여</h1>
+        <p className="mt-4 text-sm leading-6 text-ink/68">
           이벤트 코드 또는 이벤트 이름으로 참여한 뒤 현재 라운드, 코트, 알림을 확인합니다.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid gap-5 rounded-3xl border border-line bg-white/90 p-6 shadow-panel">
+      <form onSubmit={handleSubmit} className="grid gap-6 border-t border-line py-8">
         <label className="grid gap-2 text-sm font-semibold">
           표시 이름
           <input
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
-            className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+            className="poster-input"
             placeholder="이름 입력"
           />
         </label>
@@ -90,7 +91,7 @@ export default function GuestPage() {
           <select
             value={gender}
             onChange={(event) => setGender(event.target.value as ParticipantGender)}
-            className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+            className="poster-input"
           >
             <option value="">선택</option>
             <option value="male">남성</option>
@@ -103,7 +104,7 @@ export default function GuestPage() {
           <input
             value={eventQuery}
             onChange={(event) => setEventQuery(event.target.value)}
-            className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+            className="poster-input"
             placeholder="예: ABC123"
           />
         </label>
@@ -113,7 +114,7 @@ export default function GuestPage() {
           <select
             value={guestNtrp}
             onChange={(event) => setGuestNtrp(Number(event.target.value))}
-            className="rounded-2xl border border-line bg-surface px-4 py-3 outline-none focus:border-accent"
+            className="poster-input"
           >
             {NTRP_OPTIONS.map((option) => (
               <option key={option} value={option}>
@@ -129,11 +130,7 @@ export default function GuestPage() {
           </div>
         ) : null}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="inline-flex w-fit rounded-2xl bg-accentStrong px-5 py-3 text-sm font-bold text-white"
-        >
+        <button type="submit" disabled={submitting} className="poster-button w-fit disabled:opacity-60">
           {submitting ? "참여 중..." : "이벤트 참여"}
         </button>
       </form>
