@@ -1,6 +1,6 @@
 "use client";
 
-import { getAppUrl, getHostIdentity } from "@/lib/auth";
+import { getAppUrl, getAuthIdentity } from "@/lib/auth";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -29,7 +29,7 @@ function AuthCallbackContent() {
           }
         }
 
-        const identity = await getHostIdentity();
+        const identity = await getAuthIdentity();
         if (!identity) {
           throw new Error("로그인 세션을 확인하지 못했습니다.");
         }

@@ -6,6 +6,7 @@ const GUEST_SESSION_STORAGE_KEY = "tennis-guest-session";
 const LAST_EVENT_STORAGE_KEY = "tennis-last-event";
 const LAST_PARTICIPANT_STORAGE_KEY = "tennis-last-participant";
 const EVENT_BROADCAST_PREFIX = "tennis-event-channel";
+const LAST_ROLE_STORAGE_KEY = "tennis-last-role";
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined";
@@ -99,4 +100,21 @@ export function createEventBroadcastChannel(eventId: string): BroadcastChannel |
   }
 
   return new BroadcastChannel(`${EVENT_BROADCAST_PREFIX}-${eventId}`);
+}
+
+export function saveLastRole(role: "host" | "player"): void {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(LAST_ROLE_STORAGE_KEY, role);
+}
+
+export function loadLastRole(): "host" | "player" | null {
+  if (!canUseStorage()) {
+    return null;
+  }
+
+  const role = window.localStorage.getItem(LAST_ROLE_STORAGE_KEY);
+  return role === "host" || role === "player" ? role : null;
 }

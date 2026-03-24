@@ -32,6 +32,9 @@ type EventRow = {
   round_view_mode: RoundViewMode;
   status: EventRecord["status"];
   state: EventRecord | null;
+  is_saved?: boolean | null;
+  saved_at?: string | null;
+  saved_by_user_id?: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -148,6 +151,9 @@ function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "i
     notifications,
     createdAt: event.createdAt ?? new Date().toISOString(),
     updatedAt: event.updatedAt ?? new Date().toISOString(),
+    isSaved: Boolean(event.isSaved),
+    savedAt: event.savedAt ?? null,
+    savedByUserId: event.savedByUserId ?? null,
   };
 }
 
@@ -201,6 +207,9 @@ function hydrateEvent(row: EventRow): EventRecord {
         roundCount: state.roundCount ?? row.round_count,
         roundViewMode: state.roundViewMode ?? row.round_view_mode,
         status: state.status ?? row.status,
+        isSaved: state.isSaved ?? row.is_saved ?? false,
+        savedAt: state.savedAt ?? row.saved_at ?? null,
+        savedByUserId: state.savedByUserId ?? row.saved_by_user_id ?? null,
         createdAt: state.createdAt ?? row.created_at ?? new Date().toISOString(),
         updatedAt: state.updatedAt ?? row.updated_at ?? new Date().toISOString(),
       });
@@ -222,6 +231,9 @@ function hydrateEvent(row: EventRow): EventRecord {
       rounds: [],
       stats: {},
       notifications: [],
+      isSaved: row.is_saved ?? false,
+      savedAt: row.saved_at ?? null,
+      savedByUserId: row.saved_by_user_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
     });
@@ -243,6 +255,9 @@ function hydrateEvent(row: EventRow): EventRecord {
       rounds: [],
       stats: {},
       notifications: [],
+      isSaved: row.is_saved ?? false,
+      savedAt: row.saved_at ?? null,
+      savedByUserId: row.saved_by_user_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
     });
@@ -273,6 +288,9 @@ async function persistEvent(event: EventRecord): Promise<void> {
       round_view_mode: event.roundViewMode,
       status: event.status,
       state: event,
+      is_saved: event.isSaved ?? false,
+      saved_at: event.savedAt ?? null,
+      saved_by_user_id: event.savedByUserId ?? null,
       created_at: event.createdAt,
       updated_at: event.updatedAt,
     },
@@ -297,7 +315,7 @@ async function loadEventsFromSource(): Promise<EventRecord[]> {
 
     const { data, error } = await supabase
       .from("events")
-      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
+      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
       .order("created_at", { ascending: false });
 
     if (error || !data) {
@@ -401,6 +419,7 @@ export async function createEvent(input: {
     displayName: input.hostName.trim(),
     role: "host",
     sessionId,
+    userId: input.hostUserId ?? sessionId,
     gender: "unspecified",
     guestNtrp: null,
     hostSkillOverride: "medium",
@@ -422,6 +441,9 @@ export async function createEvent(input: {
     notifications: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    isSaved: false,
+    savedAt: null,
+    savedByUserId: null,
   };
 
   await persistEvent(event);
@@ -446,7 +468,7 @@ export async function loadEvent(eventId: string): Promise<EventRecord | null> {
 
     const { data, error } = await supabase
       .from("events")
-      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, created_at, updated_at")
+      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
       .eq("id", eventId)
       .maybeSingle();
 
@@ -484,7 +506,7 @@ export async function findEventByCodeOrName(query: string): Promise<EventRecord 
 
 export async function joinEvent(
   eventId: string,
-  input: { displayName: string; gender: ParticipantGender; guestNtrp?: number | null },
+  input: { displayName: string; gender: ParticipantGender; guestNtrp?: number | null; userId?: string | null },
 ): Promise<Participant | null> {
   const sessionId = getSessionId("guest");
   const event = await loadEvent(eventId);
@@ -508,6 +530,7 @@ export async function joinEvent(
   const nextParticipant = createParticipant({
     eventId,
     sessionId,
+    userId: input.userId ?? null,
     displayName: normalizedName,
     gender: input.gender,
     guestNtrp: input.guestNtrp ?? null,
@@ -1002,5 +1025,17 @@ export async function markEventNotificationRead(eventId: string, notificationId:
   return updateEvent(eventId, (event) => ({
     ...event,
     notifications: markNotificationRead(event.notifications, notificationId),
+  }));
+}
+
+export async function markEventSaved(
+  eventId: string,
+  input: { isSaved: boolean; savedAt?: string | null; savedByUserId?: string | null },
+): Promise<EventRecord | null> {
+  return updateEvent(eventId, (event) => ({
+    ...event,
+    isSaved: input.isSaved,
+    savedAt: input.savedAt ?? null,
+    savedByUserId: input.savedByUserId ?? null,
   }));
 }

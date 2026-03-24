@@ -1,10 +1,12 @@
 "use client";
 
 import { QRCodeSVG } from "qrcode.react";
-import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, loadEvent, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
+import { getCurrentProfile } from "@/lib/auth";
+import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, loadEvent, markEventSaved, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
+import { buildFinalRanking, saveCompletedEventRecord } from "@/lib/history";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
-import { Participant, PlayerStats, SkillLevel } from "@/lib/types";
+import { Participant, PlayerStats, SkillLevel, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -36,6 +38,8 @@ export default function HostEventPage() {
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState<Participant["gender"]>("male");
   const [newPlayerSkill, setNewPlayerSkill] = useState<SkillLevel>("medium");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [saveInfo, setSaveInfo] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) {
@@ -46,6 +50,7 @@ export default function HostEventPage() {
 
     const refresh = async () => {
       try {
+        setProfile(await getCurrentProfile());
         const nextEvent = await loadEvent(eventId);
         setEvent(nextEvent);
         setError(null);
@@ -105,6 +110,7 @@ export default function HostEventPage() {
       return summary;
     }, {});
   }, [event]);
+  const finalRanking = useMemo(() => (event?.status === "completed" ? buildFinalRanking(event) : []), [event]);
 
   async function refreshEvent(): Promise<void> {
     if (!eventId) {
@@ -256,6 +262,32 @@ export default function HostEventPage() {
     setEvent(nextEvent);
   }
 
+  async function handleSaveDecision(shouldSave: boolean): Promise<void> {
+    if (!event || !profile) {
+      return;
+    }
+
+    if (!shouldSave) {
+      const nextEvent = await markEventSaved(event.id, {
+        isSaved: false,
+        savedAt: null,
+        savedByUserId: null,
+      });
+      setEvent(nextEvent);
+      setSaveInfo("이벤트를 저장하지 않도록 설정했습니다.");
+      return;
+    }
+
+    const saved = await saveCompletedEventRecord(event);
+    const nextEvent = await markEventSaved(event.id, {
+      isSaved: true,
+      savedAt: saved.savedAt,
+      savedByUserId: profile.id,
+    });
+    setEvent(nextEvent);
+    setSaveInfo("이벤트를 저장했습니다. 호스트 이력과 플레이어 내 기록에서 확인할 수 있습니다.");
+  }
+
   if (loading) {
     return (
       <main className="poster-page max-w-3xl">
@@ -293,6 +325,12 @@ export default function HostEventPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <Link href="/" className="poster-button-secondary">
+            역할 선택
+          </Link>
+          <Link href="/history/host" className="poster-button-secondary">
+            호스트 이력
+          </Link>
           <button type="button" onClick={refreshEvent} className="poster-button-secondary">
             새로고침
           </button>
@@ -478,6 +516,62 @@ export default function HostEventPage() {
                   </div>
                 ))}
               </div>
+            </section>
+          ) : null}
+
+          {event.status === "completed" ? (
+            <section className="border-t border-line py-6">
+              <h2 className="text-3xl font-black">최종 결과</h2>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                {finalRanking.slice(0, 3).map((player) => (
+                  <div key={player.participantId} className="border-b border-line pb-4">
+                    <div className="text-sm font-semibold text-accentStrong">{player.rank}등</div>
+                    <div className="mt-2 text-2xl font-black">{player.name}</div>
+                    <div className="mt-2 text-sm text-ink/65">승 {player.stats.wins} · 득점 {player.stats.pointsScored} · 득실 {player.stats.pointDiff}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button type="button" onClick={() => void handleSaveDecision(true)} className="poster-button">
+                  이벤트 저장
+                </button>
+                <button type="button" onClick={() => void handleSaveDecision(false)} className="poster-button-secondary">
+                  저장 안 함
+                </button>
+                <Link href={`/event/${event.id}/leaderboard`} className="poster-button-secondary">
+                  전체 랭킹 보기
+                </Link>
+              </div>
+              <div className="mt-8 overflow-x-auto">
+                <table className="poster-table min-w-full text-left">
+                  <thead>
+                    <tr>
+                      <th>순위</th>
+                      <th>이름</th>
+                      <th>승</th>
+                      <th>패</th>
+                      <th>득점</th>
+                      <th>득실차</th>
+                      <th>휴식</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {finalRanking.map((player) => (
+                      <tr key={player.participantId}>
+                        <td>{player.rank}등</td>
+                        <td className="font-semibold">{player.name}</td>
+                        <td>{player.stats.wins}</td>
+                        <td>{player.stats.losses}</td>
+                        <td>{player.stats.pointsScored}</td>
+                        <td>{player.stats.pointDiff}</td>
+                        <td>{player.stats.rests}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {event.isSaved ? <div className="mt-3 text-sm text-accentStrong">저장 완료 · {event.savedAt ? new Date(event.savedAt).toLocaleString("ko-KR") : ""}</div> : null}
+              {saveInfo ? <div className="mt-2 text-sm text-ink/70">{saveInfo}</div> : null}
             </section>
           ) : null}
 

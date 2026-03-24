@@ -1,10 +1,10 @@
 "use client";
 
-import { getHostIdentity, signInHost, signOutHost, subscribeAuthChanges } from "@/lib/auth";
+import { getCurrentProfile } from "@/lib/auth";
 import { createEvent } from "@/lib/events";
-import { isSupabaseEnabled } from "@/lib/supabase";
 import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
-import { RoundViewMode } from "@/lib/types";
+import { RoundViewMode, UserProfile } from "@/lib/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -13,8 +13,8 @@ const ROUND_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 export default function HostPage() {
   const router = useRouter();
-  const [hostIdentity, setHostIdentity] = useState<{ id: string; email?: string | null } | null>(null);
-  const [email, setEmail] = useState("");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [eventName, setEventName] = useState("");
   const [hostName, setHostName] = useState("");
   const [matchType, setMatchType] = useState<"singles" | "doubles">("doubles");
@@ -22,46 +22,24 @@ export default function HostPage() {
   const [roundCount, setRoundCount] = useState(4);
   const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("full");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isSupabaseEnabled()) {
-      return;
-    }
-
-    const syncAuth = async () => {
-      setHostIdentity(await getHostIdentity());
+    const sync = async () => {
+      const nextProfile = await getCurrentProfile();
+      setProfile(nextProfile);
+      setHostName(nextProfile?.displayName ?? "");
+      setCheckingAuth(false);
     };
 
-    void syncAuth();
-    const unsubscribe = subscribeAuthChanges(() => {
-      void syncAuth();
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
+    void sync();
   }, []);
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setError(null);
-    setInfo(null);
-
-    try {
-      await signInHost(email);
-      setInfo("매직 링크를 전송했습니다. 메일에서 로그인 후 이 페이지로 돌아오세요.");
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "로그인 메일 전송에 실패했습니다.");
-    }
-  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
 
-    if (isSupabaseEnabled() && !hostIdentity) {
-      setError("호스트는 먼저 Supabase Auth로 로그인해야 합니다.");
+    if (!profile) {
+      setError("먼저 로그인해 주세요.");
       return;
     }
 
@@ -77,12 +55,34 @@ export default function HostPage() {
       courtCount,
       roundCount,
       roundViewMode,
-      hostUserId: hostIdentity?.id,
+      hostUserId: profile.id,
     });
 
     saveLastEvent(nextEvent.id);
     saveLastParticipant(hostParticipant.id);
     router.push(`/host/event/${nextEvent.id}`);
+  }
+
+  if (checkingAuth) {
+    return <main className="poster-page max-w-4xl text-sm text-ink/70">호스트 정보를 확인하는 중...</main>;
+  }
+
+  if (!profile) {
+    return (
+      <main className="poster-page max-w-4xl">
+        <div className="border-t border-line py-8">
+          <h1 className="text-4xl font-black tracking-[-0.04em]">호스트는 로그인 후 이용할 수 있습니다.</h1>
+          <div className="mt-5 flex gap-3">
+            <Link href="/" className="poster-button">
+              로그인하러 가기
+            </Link>
+            <Link href="/history/host" className="poster-button-secondary">
+              호스트 이력
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -91,43 +91,17 @@ export default function HostPage() {
         <p className="poster-label">Host Flow</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">호스트 이벤트 생성</h1>
         <p className="mt-4 max-w-2xl text-sm leading-6 text-ink/68">
-          이벤트 이름, 경기 방식, 라운드 공개 방식을 설정한 뒤 참가자를 모아 경기표를 생성합니다.
+          로그인 계정으로 이벤트를 만들고, 종료 후 저장 여부를 선택해 이력으로 남길 수 있습니다.
         </p>
+        <div className="mt-4 text-sm text-ink/60">계정: {profile.displayName} · {profile.email}</div>
       </div>
 
-      {isSupabaseEnabled() && !hostIdentity ? (
-        <form onSubmit={handleLogin} className="mb-8 grid gap-4 border-t border-line py-6">
-          <h2 className="text-2xl font-black">호스트 로그인</h2>
-          <p className="text-sm leading-6 text-ink/68">
-            Supabase Auth 매직 링크로 로그인한 뒤 호스트 이벤트를 생성합니다.
-          </p>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="host@example.com"
-            className="poster-input"
-          />
-          {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-          {info ? <div className="border-l-2 border-accentStrong pl-4 text-sm text-ink/72">{info}</div> : null}
-          <div className="text-xs leading-5 text-ink/55">
-            메일이 특정 계정에서만 도착한다면, 현재 Supabase SMTP 발신자가 Resend 테스트 주소이거나
-            검증되지 않은 도메인일 가능성이 높습니다.
-          </div>
-          <button type="submit" className="poster-button w-fit">
-            로그인 메일 보내기
-          </button>
-        </form>
-      ) : null}
-
-      {isSupabaseEnabled() && hostIdentity ? (
-        <div className="mb-8 flex items-center justify-between border-t border-line py-4">
-          <div className="text-sm text-ink/70">로그인됨: {hostIdentity.email ?? hostIdentity.id}</div>
-          <button type="button" onClick={() => void signOutHost()} className="poster-button-secondary">
-            로그아웃
-          </button>
-        </div>
-      ) : null}
+      <div className="mb-8 flex flex-wrap gap-3 border-t border-line py-4">
+        <Link href="/" className="poster-button-secondary">역할 선택</Link>
+        <Link href="/history/host" className="poster-button-secondary">호스트 이력</Link>
+        <Link href="/history/player" className="poster-button-secondary">내 기록</Link>
+        {profile.isAdmin ? <Link href="/admin" className="poster-button-secondary">관리자</Link> : null}
+      </div>
 
       <form onSubmit={handleSubmit} className="grid gap-8 border-t border-line py-8">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -166,56 +140,34 @@ export default function HostPage() {
 
           <label className="grid gap-2 text-sm font-semibold">
             코트 수
-            <select
-              value={courtCount}
-              onChange={(event) => setCourtCount(Number(event.target.value))}
-              className="poster-input"
-            >
+            <select value={courtCount} onChange={(event) => setCourtCount(Number(event.target.value))} className="poster-input">
               {COURT_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}개
-                </option>
+                <option key={option} value={option}>{option}개</option>
               ))}
             </select>
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
             라운드 수
-            <select
-              value={roundCount}
-              onChange={(event) => setRoundCount(Number(event.target.value))}
-              className="poster-input"
-            >
+            <select value={roundCount} onChange={(event) => setRoundCount(Number(event.target.value))} className="poster-input">
               {ROUND_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}라운드
-                </option>
+                <option key={option} value={option}>{option}라운드</option>
               ))}
             </select>
           </label>
 
           <label className="grid gap-2 text-sm font-semibold">
             라운드 보기
-            <select
-              value={roundViewMode}
-              onChange={(event) => setRoundViewMode(event.target.value as RoundViewMode)}
-              className="poster-input"
-            >
+            <select value={roundViewMode} onChange={(event) => setRoundViewMode(event.target.value as RoundViewMode)} className="poster-input">
               <option value="progressive">progressive</option>
               <option value="full">full</option>
             </select>
           </label>
         </div>
 
-        {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
+        {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-        <button type="submit" className="poster-button w-fit">
-          이벤트 만들기
-        </button>
+        <button type="submit" className="poster-button w-fit">이벤트 만들기</button>
       </form>
     </main>
   );

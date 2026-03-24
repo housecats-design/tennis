@@ -35,6 +35,7 @@ export function createParticipant(input: {
   hostSkillOverride?: Participant["skillLevel"] | null;
   role: "host" | "guest";
   sessionId?: string;
+  userId?: string | null;
 }): Participant {
   return {
     id: makeId(),
@@ -49,6 +50,7 @@ export function createParticipant(input: {
     }),
     role: input.role,
     sessionId: input.sessionId ?? null,
+    userId: input.userId ?? null,
     joinedAt: new Date().toISOString(),
     isActive: true,
   };

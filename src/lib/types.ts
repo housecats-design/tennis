@@ -5,6 +5,9 @@ export type ParticipantRole = "host" | "guest";
 export type ParticipantGender = "male" | "female" | "unspecified";
 export type SkillLevel = "high" | "medium" | "low";
 export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
+export type AppRole = "host" | "player";
+export type AuthMode = "login" | "signup";
+export type UserRole = "member" | "admin";
 
 export type Player = {
   id: string;
@@ -125,6 +128,9 @@ export type EventRecord = {
   notifications: Notification[];
   createdAt: string;
   updatedAt: string;
+  isSaved?: boolean;
+  savedAt?: string | null;
+  savedByUserId?: string | null;
 };
 
 export type GuestAssignment = {
@@ -134,4 +140,97 @@ export type GuestAssignment = {
   teammates?: string[];
   opponents?: string[];
   message: string;
+};
+
+export type AuthIdentity = {
+  id: string;
+  email: string;
+};
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  loginId: string;
+  displayName: string;
+  isAdmin: boolean;
+  memo: string;
+  isDeleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RankedPlayer = {
+  participantId: string;
+  userId?: string | null;
+  name: string;
+  gender: ParticipantGender;
+  guestNtrp?: number | null;
+  rank: number;
+  stats: PlayerStats;
+};
+
+export type SavedEventSummary = {
+  id: string;
+  sourceEventId: string;
+  eventName: string;
+  hostUserId: string;
+  matchType: MatchType;
+  participantCount: number;
+  playedAt: string;
+  savedAt: string;
+  ranking: RankedPlayer[];
+  topThree: RankedPlayer[];
+};
+
+export type SavedEventRecord = SavedEventSummary & {
+  snapshot: EventRecord;
+};
+
+export type UserEventHistory = {
+  id: string;
+  savedEventId: string;
+  eventName: string;
+  matchType: MatchType;
+  userId: string;
+  participantId: string;
+  rank: number;
+  stats: PlayerStats;
+  createdAt: string;
+};
+
+export type PairHistoryRecord = {
+  id: string;
+  userId: string;
+  pairedUserId: string;
+  pairKey: string;
+  pairedName: string;
+  frequency: number;
+  lastPlayedAt: string;
+};
+
+export type MatchHistoryRecord = {
+  id: string;
+  savedEventId: string;
+  eventName: string;
+  userId: string;
+  participantId: string;
+  roundNumber: number;
+  courtNumber: number;
+  result: "win" | "loss" | "skipped";
+  scoreFor: number;
+  scoreAgainst: number;
+  teammates: string[];
+  opponents: string[];
+  createdAt: string;
+};
+
+export type AdminUserSummary = {
+  profile: UserProfile;
+  totalSavedEvents: number;
+  totalMatches: number;
+  wins: number;
+  losses: number;
+  pointsScored: number;
+  pointsAllowed: number;
+  pointDiff: number;
 };
