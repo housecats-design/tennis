@@ -22,6 +22,7 @@ export default function HostPage() {
   const [roundCount, setRoundCount] = useState(4);
   const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("full");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const sync = async () => {
@@ -48,19 +49,37 @@ export default function HostPage() {
       return;
     }
 
-    const { event: nextEvent, hostParticipant } = await createEvent({
-      eventName,
-      hostName,
-      matchType,
-      courtCount,
-      roundCount,
-      roundViewMode,
-      hostUserId: profile.id,
-    });
+    setSubmitting(true);
 
-    saveLastEvent(nextEvent.id);
-    saveLastParticipant(hostParticipant.id);
-    router.push(`/host/event/${nextEvent.id}`);
+    try {
+      console.info("[host-create] creating event", {
+        eventName: eventName.trim(),
+        hostUserId: profile.id,
+        matchType,
+        courtCount,
+        roundCount,
+        roundViewMode,
+      });
+
+      const { event: nextEvent, hostParticipant } = await createEvent({
+        eventName,
+        hostName,
+        matchType,
+        courtCount,
+        roundCount,
+        roundViewMode,
+        hostUserId: profile.id,
+      });
+
+      saveLastEvent(nextEvent.id);
+      saveLastParticipant(hostParticipant.id);
+      router.push(`/host/event/${nextEvent.id}`);
+    } catch (submitError) {
+      console.error("[host-create] failed", submitError);
+      setError(submitError instanceof Error ? submitError.message : "이벤트 생성에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (checkingAuth) {
@@ -167,7 +186,9 @@ export default function HostPage() {
 
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-        <button type="submit" className="poster-button w-fit">이벤트 만들기</button>
+        <button type="submit" disabled={submitting} className="poster-button w-fit disabled:opacity-60">
+          {submitting ? "생성 중..." : "이벤트 만들기"}
+        </button>
       </form>
     </main>
   );
