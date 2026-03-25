@@ -158,6 +158,88 @@ export async function signOutAccount(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+export async function requestPasswordReset(identifier: string): Promise<void> {
+  const normalizedIdentifier = identifier.trim().toLowerCase();
+  if (!normalizedIdentifier) {
+    throw new Error("아이디 또는 이메일을 입력해 주세요.");
+  }
+
+  const profile = normalizedIdentifier.includes("@")
+    ? await getProfileByIdentifier(normalizedIdentifier)
+    : await getProfileByIdentifier(normalizedIdentifier);
+  const email = normalizedIdentifier.includes("@")
+    ? normalizedIdentifier
+    : profile?.email ?? "";
+
+  if (!email) {
+    throw new Error("가입된 아이디 또는 이메일을 찾을 수 없습니다.");
+  }
+
+  const supabase = requireSupabase();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${DEFAULT_APP_URL}/reset-password`,
+  });
+
+  if (error) {
+    throw formatAuthError(error);
+  }
+}
+
+export async function establishRecoverySession(): Promise<void> {
+  const supabase = requireSupabase();
+  const hash = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+  const hashParams = new URLSearchParams(hash);
+  const accessToken = hashParams.get("access_token");
+  const refreshToken = hashParams.get("refresh_token");
+  const errorDescription = hashParams.get("error_description");
+
+  if (errorDescription) {
+    throw new Error(decodeURIComponent(errorDescription));
+  }
+
+  if (accessToken && refreshToken) {
+    const { error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw formatAuthError(error);
+    }
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.user) {
+    throw new Error("유효하지 않거나 만료된 재설정 링크입니다.");
+  }
+}
+
+export async function updateAccountPassword(newPassword: string, confirmPassword: string): Promise<void> {
+  if (!newPassword || !confirmPassword) {
+    throw new Error("새 비밀번호와 확인 비밀번호를 모두 입력해 주세요.");
+  }
+
+  if (newPassword !== confirmPassword) {
+    throw new Error("비밀번호 확인이 일치하지 않습니다.");
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error("비밀번호는 6자 이상이어야 합니다.");
+  }
+
+  const supabase = requireSupabase();
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (error) {
+    throw formatAuthError(error);
+  }
+}
+
 export function subscribeAuthChanges(callback: () => void): (() => void) | null {
   const supabase = getSupabaseClient();
   if (!supabase) {

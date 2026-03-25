@@ -1,6 +1,13 @@
 "use client";
 
-import { getCurrentProfile, signInAccount, signOutAccount, signUpAccount, subscribeAuthChanges } from "@/lib/auth";
+import {
+  getCurrentProfile,
+  requestPasswordReset,
+  signInAccount,
+  signOutAccount,
+  signUpAccount,
+  subscribeAuthChanges,
+} from "@/lib/auth";
 import { loadLastRole, saveLastRole } from "@/lib/storage";
 import { AuthMode, AppRole, UserProfile } from "@/lib/types";
 import Link from "next/link";
@@ -60,6 +67,21 @@ export default function HomePage() {
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "인증 처리에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handlePasswordReset(): Promise<void> {
+    setError(null);
+    setInfo(null);
+    setSubmitting(true);
+
+    try {
+      await requestPasswordReset(identifier);
+      setInfo("비밀번호 재설정 메일을 보냈습니다. 메일의 링크에서 새 비밀번호를 설정해 주세요.");
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : "비밀번호 재설정 메일 전송에 실패했습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -152,6 +174,14 @@ export default function HomePage() {
                   비밀번호
                   <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="poster-input" />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => void handlePasswordReset()}
+                  disabled={submitting}
+                  className="w-fit text-sm font-semibold text-accentStrong disabled:opacity-60"
+                >
+                  비밀번호 재설정 메일 보내기
+                </button>
               </>
             ) : (
               <>
