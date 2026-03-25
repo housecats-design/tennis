@@ -2,10 +2,28 @@
 
 import { QRCodeSVG } from "qrcode.react";
 import { getCurrentProfile } from "@/lib/auth";
-import { canEditParticipants, finalizeRound, generateEventSchedule, getJoinUrl, getRoundInstructions, loadEvent, markEventSaved, reassignRound, saveParticipants, skipMatch, subscribeToEvent, updateMatchScores } from "@/lib/events";
+import {
+  addFutureRound,
+  canEditParticipants,
+  deleteFutureRound,
+  finalizeRound,
+  forceCloseRound,
+  generateEventSchedule,
+  getJoinUrl,
+  getRoundInstructions,
+  loadEvent,
+  markEventSaved,
+  reassignRound,
+  reassignSingleMatch,
+  saveParticipants,
+  skipMatch,
+  subscribeToEvent,
+  updateMatchScores,
+} from "@/lib/events";
 import { buildFinalRanking, saveCompletedEventRecord } from "@/lib/history";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
+import { listProfiles } from "@/lib/users";
 import { Participant, PlayerStats, SkillLevel, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -39,6 +57,8 @@ export default function HostEventPage() {
   const [newPlayerGender, setNewPlayerGender] = useState<Participant["gender"]>("male");
   const [newPlayerSkill, setNewPlayerSkill] = useState<SkillLevel>("medium");
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [members, setMembers] = useState<UserProfile[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [saveInfo, setSaveInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,6 +71,7 @@ export default function HostEventPage() {
     const refresh = async () => {
       try {
         setProfile(await getCurrentProfile());
+        setMembers(await listProfiles());
         const nextEvent = await loadEvent(eventId);
         setEvent(nextEvent);
         setError(null);
@@ -110,6 +131,14 @@ export default function HostEventPage() {
       return summary;
     }, {});
   }, [event]);
+  const maxScheduledGames = useMemo(
+    () => Math.max(0, ...Object.values(scheduledSummary).map((item) => item.scheduledGames)),
+    [scheduledSummary],
+  );
+  const availableMembers = useMemo(() => {
+    const existingUserIds = new Set((event?.participants ?? []).map((participant) => participant.userId).filter(Boolean));
+    return members.filter((member) => !member.isDeleted && member.id !== profile?.id && !existingUserIds.has(member.id));
+  }, [event?.participants, members, profile?.id]);
   const finalRanking = useMemo(() => (event?.status === "completed" ? buildFinalRanking(event) : []), [event]);
 
   async function refreshEvent(): Promise<void> {
@@ -176,7 +205,9 @@ export default function HostEventPage() {
         hostSkillOverride: newPlayerSkill,
         skillLevel: newPlayerSkill,
         role: "guest",
+        source: "manual",
         sessionId: null,
+        userId: null,
       },
     ];
 
@@ -185,6 +216,40 @@ export default function HostEventPage() {
     setNewPlayerName("");
     setNewPlayerGender("male");
     setNewPlayerSkill("medium");
+  }
+
+  async function handleAddMemberParticipant(): Promise<void> {
+    if (!event || !selectedMemberId) {
+      return;
+    }
+
+    const member = availableMembers.find((item) => item.id === selectedMemberId);
+    if (!member) {
+      return;
+    }
+
+    const nextParticipants: Participant[] = [
+      ...event.participants,
+      {
+        id: `participant_${crypto.randomUUID().slice(0, 8)}`,
+        eventId: event.id,
+        userId: member.id,
+        sessionId: null,
+        displayName: member.displayName,
+        gender: "unspecified",
+        guestNtrp: null,
+        hostSkillOverride: null,
+        skillLevel: resolveParticipantSkill({ guestNtrp: null, hostSkillOverride: null }),
+        role: "guest",
+        source: "member",
+        isActive: true,
+        joinedAt: new Date().toISOString(),
+      },
+    ];
+
+    const nextEvent = await saveParticipants(event.id, nextParticipants);
+    setEvent(nextEvent);
+    setSelectedMemberId("");
   }
 
   async function handleGenerateSchedule(): Promise<void> {
@@ -259,6 +324,55 @@ export default function HostEventPage() {
     }
 
     const nextEvent = await reassignRound(event.id, roundNumber);
+    setEvent(nextEvent);
+  }
+
+  async function handleAddRound(): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    const nextEvent = await addFutureRound(event.id);
+    setEvent(nextEvent);
+  }
+
+  async function handleDeleteRound(roundNumber: number): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    try {
+      const nextEvent = await deleteFutureRound(event.id, roundNumber);
+      setEvent(nextEvent);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "라운드 삭제에 실패했습니다.");
+    }
+  }
+
+  async function handleForceCloseRound(roundNumber: number): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    const nextEvent = await forceCloseRound(event.id, roundNumber);
+    setEvent(nextEvent);
+  }
+
+  async function handleReassignSingleMatch(roundNumber: number, matchId: string): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    const nextEvent = await reassignSingleMatch(event.id, roundNumber, matchId);
+    setEvent(nextEvent);
+  }
+
+  async function handleApplyProposal(roundNumber: number, matchId: string, scoreA: number, scoreB: number): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, { scoreA, scoreB });
     setEvent(nextEvent);
   }
 
@@ -352,7 +466,13 @@ export default function HostEventPage() {
             <div className="mb-3 text-sm font-semibold text-ink/70">QR 참여 링크</div>
             <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
               <QRCodeSVG value={joinUrl} size={120} />
-              <div className="min-w-0 text-xs text-ink/65 break-all">{joinUrl}</div>
+              <div className="min-w-0 space-y-2 text-xs text-ink/65 break-all">
+                <div>{joinUrl}</div>
+                <div>
+                  참여 코드: <span className="font-semibold text-ink">{event.code}</span>
+                </div>
+                <div>게스트는 QR 스캔 또는 코드/링크 직접 입력으로 참여할 수 있습니다.</div>
+              </div>
             </div>
           </div>
 
@@ -383,7 +503,14 @@ export default function HostEventPage() {
                   <option value="unspecified">미정</option>
                 </select>
                 <div className="border-b border-line py-3 text-sm text-ink/70">
-                  NTRP {typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}
+                  {participant.source === "joined"
+                    ? "일반 참여"
+                    : participant.source === "member"
+                      ? "회원 선택"
+                      : participant.source === "manual"
+                        ? "직접 입력"
+                        : "호스트"}
+                  <div className="mt-1">NTRP {typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}</div>
                 </div>
                 <select
                   value={participant.hostSkillOverride ?? ""}
@@ -407,6 +534,35 @@ export default function HostEventPage() {
               </div>
             ))}
           </div>
+
+          <div className="mt-6 border-t border-line pt-4">
+            <div className="text-sm font-semibold text-ink">회원 목록에서 선택</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+              <select
+                value={selectedMemberId}
+                onChange={(event) => setSelectedMemberId(event.target.value)}
+                disabled={!participantsEditable}
+                className="poster-input"
+              >
+                <option value="">회원 선택</option>
+                {availableMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.displayName} · {member.email}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleAddMemberParticipant}
+                disabled={!participantsEditable || !selectedMemberId}
+                className="poster-button"
+              >
+                회원 추가
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-line pt-4 text-sm font-semibold text-ink">직접 입력</div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_120px_120px_auto]">
             <input
@@ -466,6 +622,12 @@ export default function HostEventPage() {
               대진 생성 후에는 참가자 목록이 잠깁니다.
             </p>
           ) : null}
+
+          {event.rounds.length > 0 ? (
+            <button type="button" onClick={handleAddRound} className="poster-button-secondary mt-4">
+              미래 라운드 추가
+            </button>
+          ) : null}
         </aside>
 
         <div className="grid gap-6">
@@ -485,9 +647,16 @@ export default function HostEventPage() {
                       <span>Rests {stats?.rests ?? 0}</span>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink/60">
-                      <span>예정 경기 수 {plan.scheduledGames}</span>
+                      <span className={maxScheduledGames - plan.scheduledGames >= 1 ? "font-semibold text-red-700" : ""}>
+                        예정 경기 수 {plan.scheduledGames}
+                      </span>
                       <span>예정 휴식 수 {plan.scheduledRests}</span>
                     </div>
+                    {maxScheduledGames - plan.scheduledGames >= 1 ? (
+                      <div className="mt-2 text-xs font-semibold text-red-700">
+                        예정경기수 부족 · 최대 대비 {maxScheduledGames - plan.scheduledGames}경기 적음
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -532,8 +701,9 @@ export default function HostEventPage() {
                 ))}
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
+                <div className="w-full text-sm font-semibold text-ink/75">이 이벤트를 저장할까요?</div>
                 <button type="button" onClick={() => void handleSaveDecision(true)} className="poster-button">
-                  이벤트 저장
+                  저장
                 </button>
                 <button type="button" onClick={() => void handleSaveDecision(false)} className="poster-button-secondary">
                   저장 안 함
@@ -580,7 +750,7 @@ export default function HostEventPage() {
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-3xl font-black tracking-[-0.03em]">ROUND {round.roundNumber}</h2>
                 <span className={`text-xs font-semibold uppercase tracking-[0.2em] ${round.completed ? "text-accentStrong" : "text-amber-700"}`}>
-                  {round.completed ? "완료" : "진행 중"}
+                  {round.forceClosed ? "강제 종료" : round.completed ? "완료" : "진행 중"}
                 </span>
               </div>
 
@@ -618,6 +788,16 @@ export default function HostEventPage() {
                       }`}>
                         제출 점수 {match.scoreProposal.scoreA}:{match.scoreProposal.scoreB} /
                         상태 {match.scoreProposal.status === "pending" ? "확인 대기" : match.scoreProposal.status === "accepted" ? "확정" : "이의신청"}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleApplyProposal(round.roundNumber, match.id ?? "", match.scoreProposal?.scoreA ?? 0, match.scoreProposal?.scoreB ?? 0)}
+                            disabled={round.completed}
+                            className="border border-amber-300 px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                          >
+                            제출 점수 반영
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -628,6 +808,14 @@ export default function HostEventPage() {
                         className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
                       >
                         {match.skipped ? "건너뛰기 취소" : "경기 건너뛰기"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReassignSingleMatch(round.roundNumber, match.id ?? "")}
+                        disabled={round.completed}
+                        className="border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                      >
+                        이 경기만 재배정
                       </button>
                       <button
                         type="button"
@@ -672,6 +860,20 @@ export default function HostEventPage() {
                     className="poster-button-secondary"
                   >
                     라운드 재배정
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleForceCloseRound(round.roundNumber)}
+                    className="border border-red-200 px-4 py-3 font-semibold text-red-700"
+                  >
+                    라운드 건너뜀
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRound(round.roundNumber)}
+                    className="border border-line px-4 py-3 font-semibold"
+                  >
+                    미래 라운드 삭제
                   </button>
                 </div>
               ) : null}

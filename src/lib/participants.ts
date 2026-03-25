@@ -36,6 +36,7 @@ export function createParticipant(input: {
   role: "host" | "guest";
   sessionId?: string;
   userId?: string | null;
+  source?: Participant["source"];
 }): Participant {
   return {
     id: makeId(),
@@ -49,6 +50,7 @@ export function createParticipant(input: {
       hostSkillOverride: input.hostSkillOverride,
     }),
     role: input.role,
+    source: input.source ?? (input.role === "host" ? "host" : "manual"),
     sessionId: input.sessionId ?? null,
     userId: input.userId ?? null,
     joinedAt: new Date().toISOString(),

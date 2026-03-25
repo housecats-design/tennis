@@ -8,6 +8,8 @@ export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
 export type AppRole = "host" | "player";
 export type AuthMode = "login" | "signup";
 export type UserRole = "member" | "admin";
+export type ParticipantSource = "host" | "joined" | "member" | "manual";
+export type RoundCloseReason = "completed" | "force_closed" | "skipped";
 
 export type Player = {
   id: string;
@@ -47,6 +49,8 @@ export type Round = {
   matches: Match[];
   restPlayers: Player[];
   completed?: boolean;
+  forceClosed?: boolean;
+  closeReason?: RoundCloseReason | null;
 };
 
 export type PlayerStats = {
@@ -59,6 +63,9 @@ export type PlayerStats = {
   winRate: number;
   rests: number;
   fairPlayWarning?: boolean;
+  expectedGames?: number;
+  expectedRests?: number;
+  expectedShortage?: number;
 };
 
 export type ScheduleRequest = {
@@ -98,6 +105,7 @@ export type Participant = {
   hostSkillOverride?: SkillLevel | null;
   skillLevel: SkillLevel;
   role: ParticipantRole;
+  source?: ParticipantSource;
   joinedAt?: string;
   isActive?: boolean;
 };

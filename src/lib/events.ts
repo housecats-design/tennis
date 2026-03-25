@@ -20,6 +20,7 @@ import {
 import { accumulateRoundStats, createStatsRecord } from "@/lib/stats";
 import { getGuestNotifications, markNotificationRead, notifyRoundCompletion } from "@/lib/notifications";
 import { generateScheduleSchema } from "@/lib/validator";
+import { calculateExpectedParticipation, calculateLeaderboard } from "@/lib/leaderboard";
 
 type EventRow = {
   id: string;
@@ -56,6 +57,7 @@ function normalizeParticipants(participants: EventRecord["participants"] | null 
       hostSkillOverride: participant?.hostSkillOverride ?? null,
     }),
     role: participant?.role ?? "guest",
+    source: participant?.source ?? (participant?.role === "host" ? "host" : participant?.userId ? "joined" : "manual"),
     sessionId: participant?.sessionId ?? null,
     userId: participant?.userId ?? null,
     joinedAt: participant?.joinedAt ?? undefined,
@@ -80,6 +82,8 @@ function normalizeRounds(rounds: EventRecord["rounds"] | null | undefined): Even
     id: round?.id ?? undefined,
     roundNumber: round?.roundNumber ?? roundIndex + 1,
     completed: Boolean(round?.completed),
+    forceClosed: Boolean(round?.forceClosed),
+    closeReason: round?.closeReason ?? null,
     restPlayers: safeArray(round?.restPlayers).filter(Boolean),
     matches: safeArray(round?.matches).filter(Boolean).map((match, matchIndex) => ({
       ...match,
@@ -123,11 +127,18 @@ function normalizeStats(
         pointDiff: 0,
         winRate: 0,
         rests: 0,
+        expectedGames: 0,
+        expectedRests: 0,
+        expectedShortage: 0,
       };
     }
   }
 
   return nextStats;
+}
+
+function calculateEventStats(event: EventRecord): EventRecord["stats"] {
+  return calculateLeaderboard(buildPlayers(event.participants), event.rounds, event.matchType);
 }
 
 function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "id">): EventRecord {
@@ -383,12 +394,21 @@ function withMatchIds(rounds: Round[]): Round[] {
   return rounds.map((round) => ({
     ...round,
     id: round.id ?? makeId(`round_${round.roundNumber}`),
+    forceClosed: Boolean(round.forceClosed),
+    closeReason: round.closeReason ?? null,
     matches: round.matches.map((match) => ({
       ...match,
       id: match.id ?? makeId(`match_${round.roundNumber}_${match.court}`),
       completed: Boolean(match.completed),
     })),
   }));
+}
+
+function withDerivedEventState(event: EventRecord): EventRecord {
+  return {
+    ...event,
+    stats: calculateEventStats(event),
+  };
 }
 
 async function updateEvent(eventId: string, updater: (event: EventRecord) => EventRecord): Promise<EventRecord | null> {
@@ -423,6 +443,7 @@ export async function createEvent(input: {
     gender: "unspecified",
     guestNtrp: null,
     hostSkillOverride: "medium",
+    source: "host",
   });
 
   const event: EventRecord = {
@@ -536,6 +557,7 @@ export async function joinEvent(
     guestNtrp: input.guestNtrp ?? null,
     hostSkillOverride: null,
     role: "guest",
+    source: "joined",
   });
 
   await updateEvent(eventId, (currentEvent) => ({
@@ -555,13 +577,21 @@ export async function saveParticipants(eventId: string, participants: Participan
       guestNtrp: participant.guestNtrp ?? null,
       hostSkillOverride: participant.hostSkillOverride ?? null,
     }),
+    source: participant.source ?? (participant.role === "host" ? "host" : participant.userId ? "joined" : "manual"),
   }));
 
-  return updateEvent(eventId, (event) => ({
-    ...event,
-    participants: normalizedParticipants,
-    stats: createStatsRecord(buildPlayers(normalizedParticipants)),
-  }));
+  return updateEvent(eventId, (event) => {
+    const nextEvent = {
+      ...event,
+      participants: normalizedParticipants,
+      stats: createStatsRecord(buildPlayers(normalizedParticipants)),
+    };
+
+    return {
+      ...nextEvent,
+      stats: calculateEventStats(nextEvent),
+    };
+  });
 }
 
 export async function generateEventSchedule(eventId: string): Promise<EventRecord | null> {
@@ -593,13 +623,16 @@ export async function generateEventSchedule(eventId: string): Promise<EventRecor
     players,
   });
 
-  return updateEvent(eventId, (currentEvent) => ({
-    ...currentEvent,
-    rounds: withMatchIds(schedule.rounds),
-    stats: createStatsRecord(players),
-    notifications: [],
-    status: "in_progress",
-  }));
+  return updateEvent(eventId, (currentEvent) =>
+    withDerivedEventState({
+      ...currentEvent,
+      roundCount: schedule.rounds.length,
+      rounds: withMatchIds(schedule.rounds),
+      stats: createStatsRecord(players),
+      notifications: [],
+      status: "in_progress",
+    }),
+  );
 }
 
 function isValidScore(scoreA: number | null | undefined, scoreB: number | null | undefined): boolean {
@@ -616,6 +649,11 @@ function getMatchParticipantIds(round: Round, matchId: string): string[] {
   }
 
   return [...safeArray(match.teamA), ...safeArray(match.teamB)].map((player) => player.id);
+}
+
+function isConfirmationRequiredParticipant(event: EventRecord, participantId: string): boolean {
+  const participant = safeArray(event.participants).find((item) => item.id === participantId);
+  return Boolean(participant && participant.source === "joined" && participant.userId);
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -645,6 +683,8 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
         ? {
             ...round,
             completed: true,
+            forceClosed: Boolean(round.forceClosed),
+            closeReason: round.forceClosed ? round.closeReason ?? "force_closed" : "completed",
             matches: round.matches.map((match) => ({
               ...match,
               completed: true,
@@ -670,13 +710,13 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
 
     const allCompleted = nextRounds.length > 0 && nextRounds.every((round) => round.completed);
 
-    return {
+    return withDerivedEventState({
       ...currentEvent,
       rounds: nextRounds,
       stats,
       notifications,
-      status: allCompleted ? "completed" : "in_progress",
-    };
+      status: (allCompleted ? "completed" : "in_progress") as EventRecord["status"],
+    });
   });
 }
 
@@ -686,29 +726,31 @@ export async function updateMatchScores(
   matchId: string,
   scores: { scoreA: number | null; scoreB: number | null },
 ): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) => ({
-    ...event,
-    rounds: event.rounds.map((round) =>
-      round.roundNumber === roundNumber
-        ? {
-            ...round,
-            matches: round.matches.map((match) =>
-              match.id === matchId
-                ? {
-                    ...match,
-                    scoreA: scores.scoreA,
-                    scoreB: scores.scoreB,
-                    scoreProposal: null,
-                    isTieBreak:
-                      (scores.scoreA === 6 && scores.scoreB === 5) ||
-                      (scores.scoreA === 5 && scores.scoreB === 6),
-                  }
-                : match,
-            ),
-          }
-        : round,
-    ),
-  }));
+  return updateEvent(eventId, (event) =>
+    withDerivedEventState({
+      ...event,
+      rounds: event.rounds.map((round) =>
+        round.roundNumber === roundNumber
+          ? {
+              ...round,
+              matches: round.matches.map((match) =>
+                match.id === matchId
+                  ? {
+                      ...match,
+                      scoreA: scores.scoreA,
+                      scoreB: scores.scoreB,
+                      scoreProposal: null,
+                      isTieBreak:
+                        (scores.scoreA === 6 && scores.scoreB === 5) ||
+                        (scores.scoreA === 5 && scores.scoreB === 6),
+                    }
+                  : match,
+              ),
+            }
+          : round,
+      ),
+    }),
+  );
 }
 
 export async function submitMatchScoreProposal(
@@ -718,32 +760,34 @@ export async function submitMatchScoreProposal(
   participantId: string,
   scores: { scoreA: number; scoreB: number },
 ): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) => ({
-    ...event,
-    rounds: event.rounds.map((round) =>
-      round.roundNumber === roundNumber
-        ? {
-            ...round,
-            matches: round.matches.map((match) =>
-              match.id === matchId
-                ? {
-                    ...match,
-                    scoreProposal: {
-                      scoreA: scores.scoreA,
-                      scoreB: scores.scoreB,
-                      submittedByParticipantId: participantId,
-                      submittedAt: new Date().toISOString(),
-                      acceptedByParticipantIds: [],
-                      disputedByParticipantIds: [],
-                      status: "pending",
-                    },
-                  }
-                : match,
-            ),
-          }
-        : round,
-    ),
-  }));
+  return updateEvent(eventId, (event) =>
+    withDerivedEventState({
+      ...event,
+      rounds: event.rounds.map((round) =>
+        round.roundNumber === roundNumber
+          ? {
+              ...round,
+              matches: round.matches.map((match) =>
+                match.id === matchId
+                  ? {
+                      ...match,
+                      scoreProposal: {
+                        scoreA: scores.scoreA,
+                        scoreB: scores.scoreB,
+                        submittedByParticipantId: participantId,
+                        submittedAt: new Date().toISOString(),
+                        acceptedByParticipantIds: [],
+                        disputedByParticipantIds: [],
+                        status: "pending",
+                      },
+                    }
+                  : match,
+              ),
+            }
+          : round,
+      ),
+    }),
+  );
 }
 
 export async function respondToScoreProposal(
@@ -756,7 +800,7 @@ export async function respondToScoreProposal(
   return updateEvent(eventId, (event) => {
     const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
 
-    return {
+    return withDerivedEventState({
       ...event,
       notifications:
         response === "dispute" && hostParticipant
@@ -797,7 +841,11 @@ export async function respondToScoreProposal(
                 : match.scoreProposal.disputedByParticipantIds;
 
             const requiredAcceptCount = Math.max(
-              participantIds.filter((id) => id !== match.scoreProposal?.submittedByParticipantId).length,
+              participantIds.filter(
+                (id) =>
+                  id !== match.scoreProposal?.submittedByParticipantId &&
+                  isConfirmationRequiredParticipant(event, id),
+              ).length,
               0,
             );
             const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
@@ -820,31 +868,74 @@ export async function respondToScoreProposal(
           }),
         };
       }),
-    };
+    });
   });
 }
 
 export async function skipMatch(eventId: string, roundNumber: number, matchId: string): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) => ({
-    ...event,
-    rounds: event.rounds.map((round) =>
+  return updateEvent(eventId, (event) =>
+    withDerivedEventState({
+      ...event,
+      rounds: event.rounds.map((round) =>
+        round.roundNumber === roundNumber
+          ? {
+              ...round,
+              matches: round.matches.map((match) =>
+                match.id === matchId
+                  ? {
+                      ...match,
+                      skipped: !match.skipped,
+                      scoreA: null,
+                      scoreB: null,
+                    }
+                  : match,
+              ),
+            }
+          : round,
+      ),
+    }),
+  );
+}
+
+export async function forceCloseRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return null;
+  }
+
+  return updateEvent(eventId, (currentEvent) => {
+    const nextRounds = currentEvent.rounds.map((round) =>
       round.roundNumber === roundNumber
         ? {
             ...round,
-            matches: round.matches.map((match) =>
-              match.id === matchId
-                ? {
-                    ...match,
-                    skipped: !match.skipped,
-                    scoreA: null,
-                    scoreB: null,
-                  }
-                : match,
-            ),
+            completed: true,
+            forceClosed: true,
+            closeReason: "skipped" as const,
+            matches: round.matches.map((match) => ({
+              ...match,
+              skipped: true,
+              completed: true,
+              scoreA: null,
+              scoreB: null,
+              scoreProposal: null,
+            })),
           }
         : round,
-    ),
-  }));
+    );
+
+    const nextEvent = {
+      ...currentEvent,
+      rounds: nextRounds,
+      status: (nextRounds.every((round) => round.completed) ? "completed" : "in_progress") as EventRecord["status"],
+      notifications: notifyRoundCompletion({
+        event: currentEvent,
+        rounds: nextRounds,
+        completedRoundNumber: roundNumber,
+      }),
+    };
+
+    return withDerivedEventState(nextEvent);
+  });
 }
 
 export async function reassignRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -868,34 +959,189 @@ export async function reassignRound(eventId: string, roundNumber: number): Promi
     startRoundNumber: roundNumber,
   });
 
-  return updateEvent(eventId, (currentEvent) => ({
-    ...currentEvent,
-    rounds: currentEvent.rounds.map((round) => {
-      if (round.roundNumber < roundNumber) {
-        return round;
-      }
+  return updateEvent(eventId, (currentEvent) =>
+    withDerivedEventState({
+      ...currentEvent,
+      rounds: currentEvent.rounds.map((round) => {
+        if (round.roundNumber < roundNumber) {
+          return round;
+        }
 
-      const nextRound = regeneratedRounds.find((item) => item.roundNumber === round.roundNumber);
-      if (!nextRound) {
-        return round;
-      }
+        const nextRound = regeneratedRounds.find((item) => item.roundNumber === round.roundNumber);
+        if (!nextRound) {
+          return round;
+        }
 
-      return {
-        ...nextRound,
-        id: round.id ?? nextRound.id,
-        completed: false,
-        matches: nextRound.matches.map((match, index) => ({
-          ...match,
-          id: round.matches[index]?.id ?? match.id,
-          scoreA: null,
-          scoreB: null,
-          scoreProposal: null,
-          skipped: false,
+        return {
+          ...nextRound,
+          id: round.id ?? nextRound.id,
           completed: false,
-        })),
-      };
+          forceClosed: false,
+          closeReason: null,
+          matches: nextRound.matches.map((match, index) => ({
+            ...match,
+            id: round.matches[index]?.id ?? match.id,
+            scoreA: null,
+            scoreB: null,
+            scoreProposal: null,
+            skipped: false,
+            completed: false,
+          })),
+        };
+      }),
     }),
-  }));
+  );
+}
+
+export async function addFutureRound(eventId: string): Promise<EventRecord | null> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return null;
+  }
+
+  const startRoundNumber = safeArray(event.rounds).find((round) => !round.completed)?.roundNumber ?? event.roundCount + 1;
+  const nextRoundCount = event.roundCount + 1;
+  const regeneratedRounds = regenerateRoundsFrom({
+    matchType: event.matchType,
+    courtCount: event.courtCount,
+    roundCount: nextRoundCount,
+    players: buildPlayers(event.participants),
+    existingRounds: event.rounds,
+    startRoundNumber,
+  });
+
+  return updateEvent(eventId, (currentEvent) =>
+    withDerivedEventState({
+      ...currentEvent,
+      roundCount: nextRoundCount,
+      rounds: withMatchIds(regeneratedRounds).map((round) => {
+        const existing = currentEvent.rounds.find((item) => item.roundNumber === round.roundNumber);
+        if (!existing || existing.completed) {
+          return existing ?? round;
+        }
+
+        return {
+          ...round,
+          id: existing.id ?? round.id,
+          matches: round.matches.map((match, index) => ({
+            ...match,
+            id: existing.matches[index]?.id ?? match.id,
+          })),
+        };
+      }),
+      status: (currentEvent.status === "completed" ? "in_progress" : currentEvent.status) as EventRecord["status"],
+    }),
+  );
+}
+
+export async function deleteFutureRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return null;
+  }
+
+  const targetRound = safeArray(event.rounds).find((round) => round.roundNumber === roundNumber);
+  if (!targetRound || targetRound.completed) {
+    throw new Error("완료된 라운드는 삭제할 수 없습니다.");
+  }
+
+  const preservedRounds = safeArray(event.rounds).filter((round) => round.roundNumber < roundNumber);
+  const remainingFutureRounds = safeArray(event.rounds)
+    .filter((round) => round.roundNumber > roundNumber && !round.completed)
+    .map((round, index) => ({
+      ...round,
+      roundNumber: roundNumber + index,
+      completed: false,
+      forceClosed: false,
+      closeReason: null,
+      matches: round.matches.map((match) => ({
+        ...match,
+        scoreA: null,
+        scoreB: null,
+        skipped: false,
+        completed: false,
+        scoreProposal: null,
+      })),
+    }));
+
+  return updateEvent(eventId, (currentEvent) =>
+    withDerivedEventState({
+      ...currentEvent,
+      roundCount: Math.max(0, currentEvent.roundCount - 1),
+      rounds: [...preservedRounds, ...remainingFutureRounds],
+      status: ([...preservedRounds, ...remainingFutureRounds].every((round) => round.completed) ? "completed" : "in_progress") as EventRecord["status"],
+    }),
+  );
+}
+
+export async function reassignSingleMatch(eventId: string, roundNumber: number, matchId: string): Promise<EventRecord | null> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return null;
+  }
+
+  const targetRound = safeArray(event.rounds).find((round) => round.roundNumber === roundNumber);
+  const targetMatch = safeArray(targetRound?.matches).find((match) => match.id === matchId);
+  if (!targetRound || !targetMatch || targetRound.completed) {
+    return event;
+  }
+
+  const playersPerMatch = event.matchType === "singles" ? 2 : 4;
+  const pool = [...safeArray(targetMatch.teamA), ...safeArray(targetMatch.teamB), ...safeArray(targetRound.restPlayers)];
+  if (pool.length < playersPerMatch) {
+    return event;
+  }
+
+  const rebuiltMatches = withMatchIds([
+    {
+      roundNumber,
+      matches: generateSchedule({
+        matchType: event.matchType,
+        courtCount: 1,
+        roundCount: 1,
+        players: pool,
+      }).rounds[0]?.matches ?? [],
+      restPlayers: [],
+    },
+  ])[0]?.matches ?? [];
+  const rebuiltMatch = rebuiltMatches[0];
+  if (!rebuiltMatch) {
+    return event;
+  }
+
+  const usedIds = new Set([...rebuiltMatch.teamA, ...rebuiltMatch.teamB].map((player) => player.id));
+  const nextRestPlayers = pool.filter((player) => !usedIds.has(player.id));
+
+  return updateEvent(eventId, (currentEvent) =>
+    withDerivedEventState({
+      ...currentEvent,
+      rounds: currentEvent.rounds.map((round) =>
+        round.roundNumber !== roundNumber
+          ? round
+          : {
+              ...round,
+              restPlayers: [
+                ...nextRestPlayers,
+                ...round.restPlayers.filter((player) => !pool.some((poolPlayer) => poolPlayer.id === player.id)),
+              ],
+              matches: round.matches.map((match) =>
+                match.id !== matchId
+                  ? match
+                  : {
+                      ...rebuiltMatch,
+                      id: match.id,
+                      court: match.court,
+                      scoreA: null,
+                      scoreB: null,
+                      skipped: false,
+                      completed: false,
+                      scoreProposal: null,
+                    },
+              ),
+            },
+      ),
+    }),
+  );
 }
 
 export function subscribeToEvent(eventId: string, callback: () => void): (() => void) {

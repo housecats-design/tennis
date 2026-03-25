@@ -11,6 +11,9 @@ export function createEmptyStats(): PlayerStats {
     winRate: 0,
     rests: 0,
     fairPlayWarning: false,
+    expectedGames: 0,
+    expectedRests: 0,
+    expectedShortage: 0,
   };
 }
 

@@ -1,6 +1,28 @@
 import { MatchType, Player, PlayerStats, Round, SortDirection } from "@/lib/types";
 import { accumulateRoundStats, createStatsRecord } from "@/lib/stats";
 
+export function calculateExpectedParticipation(rounds: Round[]): Record<string, { expectedGames: number; expectedRests: number }> {
+  return rounds.reduce<Record<string, { expectedGames: number; expectedRests: number }>>((summary, round) => {
+    for (const player of round.restPlayers) {
+      summary[player.id] = summary[player.id] ?? { expectedGames: 0, expectedRests: 0 };
+      summary[player.id].expectedRests += 1;
+    }
+
+    for (const match of round.matches) {
+      if (match.skipped || round.forceClosed) {
+        continue;
+      }
+
+      for (const player of [...match.teamA, ...match.teamB]) {
+        summary[player.id] = summary[player.id] ?? { expectedGames: 0, expectedRests: 0 };
+        summary[player.id].expectedGames += 1;
+      }
+    }
+
+    return summary;
+  }, {});
+}
+
 export function calculateLeaderboard(
   players: Player[],
   rounds: Round[],
@@ -14,8 +36,13 @@ export function calculateLeaderboard(
 
   const gameCounts = Object.values(stats).map((item) => item.games);
   const maxGames = gameCounts.length > 0 ? Math.max(...gameCounts) : 0;
+  const expected = calculateExpectedParticipation(rounds);
+  const maxExpectedGames = Math.max(0, ...Object.values(expected).map((item) => item.expectedGames));
   for (const playerId of Object.keys(stats)) {
     stats[playerId].fairPlayWarning = maxGames - stats[playerId].games >= 1;
+    stats[playerId].expectedGames = expected[playerId]?.expectedGames ?? 0;
+    stats[playerId].expectedRests = expected[playerId]?.expectedRests ?? 0;
+    stats[playerId].expectedShortage = Math.max(0, maxExpectedGames - (expected[playerId]?.expectedGames ?? 0));
   }
 
   return stats;

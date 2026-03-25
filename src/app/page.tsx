@@ -27,10 +27,12 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     const sync = async () => {
       setProfile(await getCurrentProfile());
+      setAuthLoading(false);
     };
 
     void sync();
@@ -145,7 +147,7 @@ export default function HomePage() {
           ) : null}
         </div>
 
-        {!profile ? (
+        {!profile && !authLoading ? (
           <form onSubmit={handleSubmit} className="grid gap-5 border-y border-line py-8">
             <div className="flex gap-3 text-sm font-semibold">
               <button
@@ -216,6 +218,7 @@ export default function HomePage() {
             </button>
           </form>
         ) : null}
+        {!profile && authLoading ? <div className="border-y border-line py-8 text-sm text-ink/70">세션을 확인하는 중...</div> : null}
       </section>
     </main>
   );

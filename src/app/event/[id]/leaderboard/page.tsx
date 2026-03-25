@@ -72,6 +72,7 @@ export default function EventLeaderboardPage() {
                 <th>성별</th>
                 <th>NTRP</th>
                 <th>경기수</th>
+                <th>예정경기수</th>
                 <th>승</th>
                 <th>패</th>
                 <th>득점</th>
@@ -92,6 +93,16 @@ export default function EventLeaderboardPage() {
                     </td>
                     <td>{typeof participant?.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-"}</td>
                     <td>{stats.games}</td>
+                    <td>
+                      <div className={stats.expectedShortage && stats.expectedShortage >= 1 ? "font-semibold text-red-700" : ""}>
+                        {stats.expectedGames ?? 0}
+                      </div>
+                      {stats.expectedShortage && stats.expectedShortage >= 1 ? (
+                        <div className="mt-1 text-[11px] font-bold tracking-[0.12em] text-red-700">
+                          예정경기수 부족
+                        </div>
+                      ) : null}
+                    </td>
                     <td>{stats.wins}</td>
                     <td>{stats.losses}</td>
                     <td>{stats.pointsScored}</td>

@@ -5,7 +5,7 @@ import { getSessionId, loadLastParticipant } from "@/lib/storage";
 import { Notification } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function formatNotificationTime(value: string | null | undefined): string {
   if (!value) {
@@ -73,6 +73,7 @@ export default function GuestEventPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
+  const lastSignalRef = useRef("");
 
   useEffect(() => {
     if (!eventId) {
@@ -157,6 +158,23 @@ export default function GuestEventPage() {
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
   const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
+
+  useEffect(() => {
+    const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+    const signal = `${assignment.title}|${assignment.body}|${unreadCount}`;
+    if (!participantId || signal === lastSignalRef.current) {
+      return;
+    }
+
+    lastSignalRef.current = signal;
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate?.([120, 80, 120]);
+      } catch (vibrationError) {
+        console.debug("[guest-event] vibrate unsupported", vibrationError);
+      }
+    }
+  }, [assignment.body, assignment.title, notifications, participantId]);
 
   async function handleSubmitProposal(): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
@@ -250,7 +268,7 @@ export default function GuestEventPage() {
         ) : null}
         {participantId && eventId ? (
           <p className="mt-2 text-xs text-ink/55">
-            참가자 정보는 실시간으로 갱신됩니다.
+            참가자 정보는 실시간으로 갱신됩니다. 일부 모바일 브라우저에서는 진동 알림이 제한될 수 있습니다.
           </p>
         ) : null}
       </section>
