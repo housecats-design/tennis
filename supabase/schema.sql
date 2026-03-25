@@ -17,7 +17,7 @@ create table if not exists events (
 );
 
 create table if not exists user_profiles (
-  id text primary key,
+  user_id text primary key,
   email text not null unique,
   login_id text not null unique,
   display_name text not null,

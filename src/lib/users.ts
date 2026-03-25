@@ -6,7 +6,8 @@ import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 const USER_PROFILES_STORAGE_KEY = "tennis-user-profiles";
 
 type UserProfileRow = {
-  id: string;
+  user_id?: string;
+  id?: string;
   email: string;
   login_id: string;
   display_name: string;
@@ -15,7 +16,7 @@ type UserProfileRow = {
   is_deleted: boolean | null;
   created_at: string | null;
   updated_at: string | null;
-};
+} & Record<string, unknown>;
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined";
@@ -47,9 +48,14 @@ function saveCachedProfiles(profiles: UserProfile[]): void {
   window.localStorage.setItem(USER_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
 }
 
-function normalizeProfile(row: Partial<UserProfileRow> & { id: string }): UserProfile {
+function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?: string }): UserProfile {
+  const resolvedUserId = row.user_id ?? row.id;
+  if (!resolvedUserId) {
+    throw new Error("user_profiles row is missing user_id");
+  }
+
   return {
-    id: row.id,
+    id: resolvedUserId,
     email: row.email ?? "",
     loginId: row.login_id ?? "",
     displayName: row.display_name ?? "",
@@ -73,29 +79,71 @@ function cacheProfile(profile: UserProfile): void {
   saveCachedProfiles(next);
 }
 
-export async function getProfileById(userId: string): Promise<UserProfile | null> {
-  if (!userId) {
+async function loadProfileByField(
+  field: "user_id" | "email" | "login_id",
+  value: string,
+): Promise<UserProfile | null> {
+  if (!value) {
     return null;
   }
 
   if (!isSupabaseEnabled()) {
-    return loadCachedProfiles().find((profile) => profile.id === userId) ?? null;
+    const cached = loadCachedProfiles();
+    if (field === "user_id") {
+      return cached.find((profile) => profile.id === value) ?? null;
+    }
+
+    if (field === "email") {
+      return cached.find((profile) => profile.email.toLowerCase() === value.toLowerCase()) ?? null;
+    }
+
+    return cached.find((profile) => profile.loginId.toLowerCase() === value.toLowerCase()) ?? null;
   }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
-    .eq("id", userId)
+    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
+    .eq(field, value)
     .maybeSingle();
 
   if (error || !data) {
-    return loadCachedProfiles().find((profile) => profile.id === userId) ?? null;
+    return loadCachedProfiles().find((profile) => {
+      if (field === "user_id") {
+        return profile.id === value;
+      }
+
+      if (field === "email") {
+        return profile.email.toLowerCase() === value.toLowerCase();
+      }
+
+      return profile.loginId.toLowerCase() === value.toLowerCase();
+    }) ?? null;
   }
 
   const profile = normalizeProfile(data as UserProfileRow);
   cacheProfile(profile);
   return profile;
+}
+
+async function assertLoginIdAvailable(loginId: string, userId?: string): Promise<void> {
+  const normalizedLoginId = loginId.trim().toLowerCase();
+  if (!normalizedLoginId) {
+    return;
+  }
+
+  const existing = await loadProfileByField("login_id", normalizedLoginId);
+  if (existing && existing.id !== userId) {
+    throw new Error("이미 사용 중인 아이디입니다.");
+  }
+}
+
+export async function getProfileById(userId: string): Promise<UserProfile | null> {
+  if (!userId) {
+    return null;
+  }
+
+  return loadProfileByField("user_id", userId);
 }
 
 export async function getProfileByIdentifier(identifier: string): Promise<UserProfile | null> {
@@ -104,36 +152,9 @@ export async function getProfileByIdentifier(identifier: string): Promise<UserPr
     return null;
   }
 
-  if (!isSupabaseEnabled()) {
-    return (
-      loadCachedProfiles().find(
-        (profile) =>
-          profile.email.toLowerCase() === normalized || profile.loginId.toLowerCase() === normalized,
-      ) ?? null
-    );
-  }
-
-  const supabase = getSupabaseClient();
-  const query = supabase!
-    .from("user_profiles")
-    .select("id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at");
-
-  const { data, error } = normalized.includes("@")
-    ? await query.eq("email", normalized).maybeSingle()
-    : await query.eq("login_id", normalized).maybeSingle();
-
-  if (error || !data) {
-    return (
-      loadCachedProfiles().find(
-        (profile) =>
-          profile.email.toLowerCase() === normalized || profile.loginId.toLowerCase() === normalized,
-      ) ?? null
-    );
-  }
-
-  const profile = normalizeProfile(data as UserProfileRow);
-  cacheProfile(profile);
-  return profile;
+  return normalized.includes("@")
+    ? loadProfileByField("email", normalized)
+    : loadProfileByField("login_id", normalized);
 }
 
 export async function ensureUserProfile(input: {
@@ -141,12 +162,22 @@ export async function ensureUserProfile(input: {
   loginId?: string;
   displayName?: string;
 }): Promise<UserProfile> {
-  const current = await getProfileById(input.identity.id);
+  const identityEmail = input.identity.email.toLowerCase();
+  const current =
+    (await getProfileById(input.identity.id)) ??
+    (await loadProfileByField("email", identityEmail));
+  const nextLoginId =
+    input.loginId?.trim().toLowerCase() ||
+    current?.loginId ||
+    identityEmail.split("@")[0];
+
+  await assertLoginIdAvailable(nextLoginId, input.identity.id);
+
   const profile: UserProfile = {
     id: input.identity.id,
-    email: input.identity.email.toLowerCase(),
-    loginId: input.loginId?.trim().toLowerCase() || current?.loginId || input.identity.email.toLowerCase(),
-    displayName: input.displayName?.trim() || current?.displayName || input.identity.email.split("@")[0],
+    email: identityEmail,
+    loginId: nextLoginId,
+    displayName: input.displayName?.trim() || current?.displayName || identityEmail.split("@")[0],
     isAdmin: current?.isAdmin ?? false,
     memo: current?.memo ?? "",
     isDeleted: current?.isDeleted ?? false,
@@ -163,7 +194,7 @@ export async function ensureUserProfile(input: {
   const supabase = getSupabaseClient();
   const { error } = await supabase!.from("user_profiles").upsert(
     {
-      id: profile.id,
+      user_id: profile.id,
       email: profile.email,
       login_id: profile.loginId,
       display_name: profile.displayName,
@@ -173,7 +204,7 @@ export async function ensureUserProfile(input: {
       created_at: profile.createdAt,
       updated_at: profile.updatedAt,
     },
-    { onConflict: "id" },
+    { onConflict: "user_id" },
   );
 
   if (error) {
@@ -191,7 +222,7 @@ export async function listProfiles(): Promise<UserProfile[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
+    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
@@ -221,7 +252,7 @@ export async function updateUserMemo(userId: string, memo: string): Promise<User
     await supabase!
       .from("user_profiles")
       .update({ memo, updated_at: nextProfile.updatedAt })
-      .eq("id", userId);
+      .eq("user_id", userId);
   }
 
   return nextProfile;
@@ -251,7 +282,7 @@ export async function softDeleteUserProfile(userId: string): Promise<UserProfile
         is_deleted: true,
         updated_at: nextProfile.updatedAt,
       })
-      .eq("id", userId);
+      .eq("user_id", userId);
   }
 
   return nextProfile;
