@@ -24,6 +24,7 @@ create table if not exists user_profiles (
   is_admin boolean default false,
   memo text default '',
   is_deleted boolean default false,
+  deleted_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

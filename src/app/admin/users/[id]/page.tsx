@@ -1,20 +1,22 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
-import { loadMatchHistory, loadPairHistory, loadUserEventHistory } from "@/lib/history";
+import { loadMatchHistory, loadPairHistory, loadPlayerSavedEvents, loadUserEventHistory } from "@/lib/history";
 import { softDeleteUserProfile, updateUserMemo, getProfileById } from "@/lib/users";
-import { MatchHistoryRecord, PairHistoryRecord, UserEventHistory, UserProfile } from "@/lib/types";
+import { MatchHistoryRecord, PairHistoryRecord, SavedEventSummary, UserEventHistory, UserProfile } from "@/lib/types";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 export default function AdminUserDetailPage() {
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const userId = typeof params.id === "string" ? params.id : "";
   const [viewer, setViewer] = useState<UserProfile | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [memo, setMemo] = useState("");
   const [eventHistory, setEventHistory] = useState<UserEventHistory[]>([]);
+  const [savedEvents, setSavedEvents] = useState<SavedEventSummary[]>([]);
   const [pairHistory, setPairHistory] = useState<PairHistoryRecord[]>([]);
   const [matchHistory, setMatchHistory] = useState<MatchHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,24 +26,68 @@ export default function AdminUserDetailPage() {
     const load = async () => {
       const currentViewer = await getCurrentProfile();
       setViewer(currentViewer);
-      if (currentViewer?.isAdmin && userId) {
-        const [nextProfile, events, pairs, matches] = await Promise.all([
+      if (!currentViewer) {
+        router.replace("/");
+        return;
+      }
+
+      if (!currentViewer.isAdmin) {
+        router.replace("/");
+        return;
+      }
+
+      if (userId) {
+        const [nextProfile, events, pairs, matches, saved] = await Promise.all([
           getProfileById(userId),
           loadUserEventHistory(userId),
           loadPairHistory(userId),
           loadMatchHistory(userId),
+          loadPlayerSavedEvents(userId),
         ]);
         setProfile(nextProfile);
         setMemo(nextProfile?.memo ?? "");
         setEventHistory(events);
         setPairHistory(pairs);
         setMatchHistory(matches);
+        setSavedEvents(saved);
       }
       setLoading(false);
     };
 
     void load();
-  }, [userId]);
+  }, [router, userId]);
+
+  const totalStats = useMemo(() => {
+    return eventHistory.reduce(
+      (accumulator, item) => {
+        accumulator.matches += item.stats.games;
+        accumulator.wins += item.stats.wins;
+        accumulator.losses += item.stats.losses;
+        accumulator.pointsScored += item.stats.pointsScored;
+        accumulator.pointsAllowed += item.stats.pointsAllowed;
+        accumulator.rests += item.stats.rests;
+        return accumulator;
+      },
+      {
+        matches: 0,
+        wins: 0,
+        losses: 0,
+        pointsScored: 0,
+        pointsAllowed: 0,
+        rests: 0,
+      },
+    );
+  }, [eventHistory]);
+
+  const latestRankingEntry = useMemo(() => {
+    for (const event of savedEvents) {
+      const found = event.ranking.find((item) => item.userId === userId);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }, [savedEvents, userId]);
 
   if (loading) {
     return <main className="poster-page max-w-6xl text-sm text-ink/70">회원 상세를 불러오는 중...</main>;
@@ -68,6 +114,13 @@ export default function AdminUserDetailPage() {
         <p className="poster-label">Member Detail</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">{profile.displayName}</h1>
         <div className="mt-4 text-sm text-ink/65">{profile.loginId} · {profile.email}</div>
+        <div className="mt-4 grid gap-2 text-sm text-ink/68 sm:grid-cols-2">
+          <div>성별: {latestRankingEntry?.gender === "male" ? "남성" : latestRankingEntry?.gender === "female" ? "여성" : "미정"}</div>
+          <div>NTRP: {typeof latestRankingEntry?.guestNtrp === "number" ? latestRankingEntry.guestNtrp.toFixed(1) : "-"}</div>
+          <div className="sm:col-span-2">
+            삭제 상태: {profile.isDeleted ? `삭제됨${profile.deletedAt ? ` · ${new Date(profile.deletedAt).toLocaleString("ko-KR")}` : ""}` : "활성"}
+          </div>
+        </div>
       </section>
 
       <section className="border-t border-line py-6">
@@ -108,13 +161,31 @@ export default function AdminUserDetailPage() {
       </section>
 
       <section className="border-t border-line py-6">
+        <h2 className="text-3xl font-black">누적 통계</h2>
+        <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
+          <div>총 경기 {totalStats.matches}</div>
+          <div>승 {totalStats.wins}</div>
+          <div>패 {totalStats.losses}</div>
+          <div>득점 {totalStats.pointsScored}</div>
+          <div>실점 {totalStats.pointsAllowed}</div>
+          <div>휴식 {totalStats.rests}</div>
+          <div className="sm:col-span-3 lg:col-span-6">득실차 {totalStats.pointsScored - totalStats.pointsAllowed}</div>
+        </div>
+      </section>
+
+      <section className="border-t border-line py-6">
         <h2 className="text-3xl font-black">이벤트 이력</h2>
         <div className="mt-4 space-y-3">
-          {eventHistory.map((item) => (
-            <div key={item.id} className="border-b border-line py-3 text-sm">
-              {item.eventName} · {item.rank}등 · 승 {item.stats.wins} / 패 {item.stats.losses} / 경기 {item.stats.games}
-            </div>
-          ))}
+          {eventHistory.map((item) => {
+            const savedEvent = savedEvents.find((event) => event.id === item.savedEventId);
+            const role = savedEvent?.hostUserId === userId ? "호스트" : "플레이어";
+            return (
+              <div key={item.id} className="border-b border-line py-3 text-sm">
+                {item.eventName} · {role} · {item.rank}등 · 승 {item.stats.wins} / 패 {item.stats.losses} / 경기 {item.stats.games}
+              </div>
+            );
+          })}
+          {eventHistory.length === 0 ? <div className="py-3 text-sm text-ink/70">이벤트 이력이 없습니다.</div> : null}
         </div>
       </section>
 
@@ -126,6 +197,7 @@ export default function AdminUserDetailPage() {
               {item.pairedName} · {item.frequency}회
             </div>
           ))}
+          {pairHistory.length === 0 ? <div className="py-3 text-sm text-ink/70">페어 이력이 없습니다.</div> : null}
         </div>
       </section>
 
@@ -139,6 +211,7 @@ export default function AdminUserDetailPage() {
               {item.opponents.length > 0 ? ` · 상대 ${item.opponents.join(", ")}` : ""}
             </div>
           ))}
+          {matchHistory.length === 0 ? <div className="py-3 text-sm text-ink/70">매치 이력이 없습니다.</div> : null}
         </div>
       </section>
     </main>

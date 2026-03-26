@@ -21,7 +21,6 @@ export default function HomePage() {
   const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [loginId, setLoginId] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +61,6 @@ export default function HomePage() {
           email,
           password,
           confirmPassword,
-          displayName,
         });
         setProfile(nextProfile);
         setInfo("회원가입이 완료되었습니다. 역할을 선택해 이동하세요.");
@@ -194,10 +192,6 @@ export default function HomePage() {
                 <label className="grid gap-2 text-sm font-semibold">
                   이메일
                   <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="poster-input" />
-                </label>
-                <label className="grid gap-2 text-sm font-semibold">
-                  표시 이름
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="poster-input" />
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   비밀번호

@@ -14,6 +14,7 @@ type UserProfileRow = {
   is_admin: boolean | null;
   memo: string | null;
   is_deleted: boolean | null;
+  deleted_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
 } & Record<string, unknown>;
@@ -62,6 +63,7 @@ function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?
     isAdmin: Boolean(row.is_admin),
     memo: row.memo ?? "",
     isDeleted: Boolean(row.is_deleted),
+    deletedAt: row.deleted_at ?? null,
     createdAt: row.created_at ?? new Date().toISOString(),
     updatedAt: row.updated_at ?? new Date().toISOString(),
   };
@@ -103,7 +105,7 @@ async function loadProfileByField(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
+    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .eq(field, value)
     .maybeSingle();
 
@@ -181,6 +183,7 @@ export async function ensureUserProfile(input: {
     isAdmin: current?.isAdmin ?? false,
     memo: current?.memo ?? "",
     isDeleted: current?.isDeleted ?? false,
+    deletedAt: current?.deletedAt ?? null,
     createdAt: current?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -201,6 +204,7 @@ export async function ensureUserProfile(input: {
       is_admin: profile.isAdmin,
       memo: profile.memo,
       is_deleted: profile.isDeleted,
+      deleted_at: profile.deletedAt ?? null,
       created_at: profile.createdAt,
       updated_at: profile.updatedAt,
     },
@@ -222,7 +226,7 @@ export async function listProfiles(): Promise<UserProfile[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, created_at, updated_at")
+    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
@@ -269,6 +273,7 @@ export async function softDeleteUserProfile(userId: string): Promise<UserProfile
     displayName: current.displayName ? `${current.displayName} (삭제)` : "Deleted User",
     email: current.email,
     isDeleted: true,
+    deletedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   cacheProfile(nextProfile);
@@ -280,6 +285,7 @@ export async function softDeleteUserProfile(userId: string): Promise<UserProfile
       .update({
         display_name: nextProfile.displayName,
         is_deleted: true,
+        deleted_at: nextProfile.deletedAt,
         updated_at: nextProfile.updatedAt,
       })
       .eq("user_id", userId);

@@ -77,14 +77,14 @@ export async function signUpAccount(input: {
   email: string;
   password: string;
   confirmPassword: string;
-  displayName: string;
+  displayName?: string;
 }): Promise<UserProfile> {
   const loginId = input.loginId.trim().toLowerCase();
   const email = input.email.trim().toLowerCase();
-  const displayName = input.displayName.trim();
+  const displayName = input.displayName?.trim() || loginId;
 
-  if (!loginId || !email || !input.password || !displayName) {
-    throw new Error("아이디, 이메일, 이름, 비밀번호를 모두 입력해 주세요.");
+  if (!loginId || !email || !input.password) {
+    throw new Error("아이디, 이메일, 비밀번호를 모두 입력해 주세요.");
   }
 
   if (input.password !== input.confirmPassword) {
@@ -177,7 +177,7 @@ export async function requestPasswordReset(identifier: string): Promise<void> {
 
   const supabase = requireSupabase();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${DEFAULT_APP_URL}/reset-password`,
+    redirectTo: `${getAppUrl()}/reset-password`,
   });
 
   if (error) {

@@ -163,6 +163,7 @@ export type UserProfile = {
   isAdmin: boolean;
   memo: string;
   isDeleted: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
