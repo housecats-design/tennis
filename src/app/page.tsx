@@ -2,6 +2,7 @@
 
 import {
   getCurrentProfile,
+  isValidLoginId,
   requestPasswordReset,
   signInAccount,
   signOutAccount,
@@ -21,8 +22,11 @@ export default function HomePage() {
   const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [loginId, setLoginId] = useState("");
+  const [realName, setRealName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [loginIdValidation, setLoginIdValidation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +63,8 @@ export default function HomePage() {
         const nextProfile = await signUpAccount({
           loginId,
           email,
+          realName,
+          nickname,
           password,
           confirmPassword,
         });
@@ -93,6 +99,23 @@ export default function HomePage() {
   }
 
   const lastRole = loadLastRole();
+
+  function handleLoginIdChange(value: string): void {
+    const sanitized = value.replace(/[^A-Za-z0-9]/g, "");
+    setLoginId(sanitized);
+
+    if (!value.trim()) {
+      setLoginIdValidation(null);
+      return;
+    }
+
+    if (sanitized !== value || !isValidLoginId(sanitized)) {
+      setLoginIdValidation("아이디는 영문과 숫자만 사용할 수 있습니다.");
+      return;
+    }
+
+    setLoginIdValidation(null);
+  }
 
   return (
     <main className="poster-page flex min-h-screen items-start py-12">
@@ -186,8 +209,17 @@ export default function HomePage() {
             ) : (
               <>
                 <label className="grid gap-2 text-sm font-semibold">
+                  이름
+                  <input value={realName} onChange={(event) => setRealName(event.target.value)} className="poster-input" />
+                </label>
+                <label className="grid gap-2 text-sm font-semibold">
+                  별명
+                  <input value={nickname} onChange={(event) => setNickname(event.target.value)} className="poster-input" />
+                </label>
+                <label className="grid gap-2 text-sm font-semibold">
                   아이디
-                  <input value={loginId} onChange={(event) => setLoginId(event.target.value)} className="poster-input" />
+                  <input value={loginId} onChange={(event) => handleLoginIdChange(event.target.value)} className="poster-input" />
+                  {loginIdValidation ? <span className="text-xs font-medium text-red-700">{loginIdValidation}</span> : null}
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   이메일

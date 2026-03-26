@@ -159,6 +159,8 @@ export type UserProfile = {
   id: string;
   email: string;
   loginId: string;
+  realName: string;
+  nickname: string;
   displayName: string;
   isAdmin: boolean;
   memo: string;

@@ -10,6 +10,8 @@ type UserProfileRow = {
   id?: string;
   email: string;
   login_id: string;
+  real_name?: string | null;
+  nickname?: string | null;
   display_name: string;
   is_admin: boolean | null;
   memo: string | null;
@@ -49,17 +51,43 @@ function saveCachedProfiles(profiles: UserProfile[]): void {
   window.localStorage.setItem(USER_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
 }
 
+export function formatProfileDisplayName(realName?: string | null, nickname?: string | null, fallback?: string | null): string {
+  const normalizedRealName = realName?.trim() ?? "";
+  const normalizedNickname = nickname?.trim() ?? "";
+  const normalizedFallback = fallback?.trim() ?? "";
+
+  if (normalizedRealName && normalizedNickname) {
+    return `${normalizedRealName}(${normalizedNickname})`;
+  }
+
+  if (normalizedRealName) {
+    return normalizedRealName;
+  }
+
+  if (normalizedNickname) {
+    return normalizedNickname;
+  }
+
+  return normalizedFallback;
+}
+
 function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?: string }): UserProfile {
   const resolvedUserId = row.user_id ?? row.id;
   if (!resolvedUserId) {
     throw new Error("user_profiles row is missing user_id");
   }
 
+  const realName = row.real_name ?? "";
+  const nickname = row.nickname ?? "";
+  const displayName = formatProfileDisplayName(realName, nickname, row.display_name ?? row.login_id ?? row.email ?? "");
+
   return {
     id: resolvedUserId,
     email: row.email ?? "",
     loginId: row.login_id ?? "",
-    displayName: row.display_name ?? "",
+    realName,
+    nickname,
+    displayName,
     isAdmin: Boolean(row.is_admin),
     memo: row.memo ?? "",
     isDeleted: Boolean(row.is_deleted),
@@ -105,7 +133,7 @@ async function loadProfileByField(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .eq(field, value)
     .maybeSingle();
 
@@ -140,6 +168,26 @@ async function assertLoginIdAvailable(loginId: string, userId?: string): Promise
   }
 }
 
+export async function isLoginIdTaken(loginId: string, userId?: string): Promise<boolean> {
+  const normalizedLoginId = loginId.trim().toLowerCase();
+  if (!normalizedLoginId) {
+    return false;
+  }
+
+  const existing = await loadProfileByField("login_id", normalizedLoginId);
+  return Boolean(existing && existing.id !== userId);
+}
+
+export async function isEmailTaken(email: string, userId?: string): Promise<boolean> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  const existing = await loadProfileByField("email", normalizedEmail);
+  return Boolean(existing && existing.id !== userId);
+}
+
 export async function getProfileById(userId: string): Promise<UserProfile | null> {
   if (!userId) {
     return null;
@@ -163,6 +211,8 @@ export async function ensureUserProfile(input: {
   identity: AuthIdentity;
   loginId?: string;
   displayName?: string;
+  realName?: string;
+  nickname?: string;
 }): Promise<UserProfile> {
   const identityEmail = input.identity.email.toLowerCase();
   const current =
@@ -175,11 +225,21 @@ export async function ensureUserProfile(input: {
 
   await assertLoginIdAvailable(nextLoginId, input.identity.id);
 
+  const nextRealName = input.realName?.trim() || current?.realName || identityEmail.split("@")[0];
+  const nextNickname = input.nickname?.trim() || current?.nickname || "";
+  const nextDisplayName = formatProfileDisplayName(
+    nextRealName,
+    nextNickname,
+    input.displayName?.trim() || current?.displayName || identityEmail.split("@")[0],
+  );
+
   const profile: UserProfile = {
     id: input.identity.id,
     email: identityEmail,
     loginId: nextLoginId,
-    displayName: input.displayName?.trim() || current?.displayName || identityEmail.split("@")[0],
+    realName: nextRealName,
+    nickname: nextNickname,
+    displayName: nextDisplayName,
     isAdmin: current?.isAdmin ?? false,
     memo: current?.memo ?? "",
     isDeleted: current?.isDeleted ?? false,
@@ -195,21 +255,58 @@ export async function ensureUserProfile(input: {
   }
 
   const supabase = getSupabaseClient();
-  const { error } = await supabase!.from("user_profiles").upsert(
-    {
-      user_id: profile.id,
-      email: profile.email,
-      login_id: profile.loginId,
-      display_name: profile.displayName,
-      is_admin: profile.isAdmin,
-      memo: profile.memo,
-      is_deleted: profile.isDeleted,
-      deleted_at: profile.deletedAt ?? null,
-      created_at: profile.createdAt,
-      updated_at: profile.updatedAt,
-    },
-    { onConflict: "user_id" },
-  );
+  const profileRow = {
+    id: profile.id,
+    user_id: profile.id,
+    email: profile.email,
+    login_id: profile.loginId,
+    real_name: profile.realName,
+    nickname: profile.nickname,
+    display_name: profile.displayName,
+    is_admin: profile.isAdmin,
+    memo: profile.memo,
+    is_deleted: profile.isDeleted,
+    deleted_at: profile.deletedAt ?? null,
+    created_at: profile.createdAt,
+    updated_at: profile.updatedAt,
+  };
+
+  let error: { message?: string } | null = null;
+
+  const primaryAttempt = await supabase!.from("user_profiles").upsert(profileRow, {
+    onConflict: "user_id",
+  });
+  error = primaryAttempt.error;
+
+  if (error?.message?.toLowerCase().includes("column") && error.message.includes("id")) {
+    const fallbackWithoutLegacyId = await supabase!.from("user_profiles").upsert(
+      {
+        user_id: profile.id,
+        email: profile.email,
+        login_id: profile.loginId,
+        real_name: profile.realName,
+        nickname: profile.nickname,
+        display_name: profile.displayName,
+        is_admin: profile.isAdmin,
+        memo: profile.memo,
+        is_deleted: profile.isDeleted,
+        deleted_at: profile.deletedAt ?? null,
+        created_at: profile.createdAt,
+        updated_at: profile.updatedAt,
+      },
+      { onConflict: "user_id" },
+    );
+    error = fallbackWithoutLegacyId.error;
+  }
+
+  if (
+    error?.message?.toLowerCase().includes("there is no unique or exclusion constraint matching the on conflict specification")
+  ) {
+    const fallbackLegacyId = await supabase!.from("user_profiles").upsert(profileRow, {
+      onConflict: "id",
+    });
+    error = fallbackLegacyId.error;
+  }
 
   if (error) {
     throw new Error(error.message);
@@ -226,7 +323,7 @@ export async function listProfiles(): Promise<UserProfile[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {

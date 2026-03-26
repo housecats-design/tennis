@@ -29,6 +29,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
+
 function parseScoreValue(value: string): number | null {
   if (!value.trim()) {
     return null;
@@ -60,6 +62,8 @@ export default function HostEventPage() {
   const [members, setMembers] = useState<UserProfile[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [saveInfo, setSaveInfo] = useState<string | null>(null);
+  const [roundActionInfo, setRoundActionInfo] = useState<string | null>(null);
+  const [roundActionPending, setRoundActionPending] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) {
@@ -68,24 +72,41 @@ export default function HostEventPage() {
       return;
     }
 
-    const refresh = async () => {
+    const loadEventOnly = async () => {
       try {
-        setProfile(await getCurrentProfile());
-        setMembers(await listProfiles());
         const nextEvent = await loadEvent(eventId);
         setEvent(nextEvent);
         setError(null);
       } catch (error) {
-        console.error("[host-event] refresh failed", error);
+        console.error("[host-event] event refresh failed", error);
         setError(error instanceof Error ? error.message : "이벤트를 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
     };
 
-    void refresh();
-    const interval = window.setInterval(refresh, 3000);
-    const unsubscribe = subscribeToEvent(eventId, refresh);
+    const bootstrap = async () => {
+      try {
+        const [nextProfile, nextMembers, nextEvent] = await Promise.all([
+          getCurrentProfile(),
+          listProfiles(),
+          loadEvent(eventId),
+        ]);
+        setProfile(nextProfile);
+        setMembers(nextMembers);
+        setEvent(nextEvent);
+        setError(null);
+      } catch (error) {
+        console.error("[host-event] bootstrap failed", error);
+        setError(error instanceof Error ? error.message : "이벤트를 불러오지 못했습니다.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void bootstrap();
+    const interval = window.setInterval(loadEventOnly, 3000);
+    const unsubscribe = subscribeToEvent(eventId, loadEventOnly);
     return () => {
       window.clearInterval(interval);
       unsubscribe();
@@ -332,8 +353,17 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await addFutureRound(event.id);
-    setEvent(nextEvent);
+    setRoundActionPending("add");
+    setRoundActionInfo("라운드를 추가하는 중...");
+    try {
+      const nextEvent = await addFutureRound(event.id);
+      setEvent(nextEvent);
+      setRoundActionInfo("라운드가 추가되었습니다.");
+    } catch (roundError) {
+      setError(roundError instanceof Error ? roundError.message : "라운드 추가에 실패했습니다.");
+    } finally {
+      setRoundActionPending(null);
+    }
   }
 
   async function handleDeleteRound(roundNumber: number): Promise<void> {
@@ -341,11 +371,16 @@ export default function HostEventPage() {
       return;
     }
 
+    setRoundActionPending(`delete-${roundNumber}`);
+    setRoundActionInfo("라운드를 삭제하는 중...");
     try {
       const nextEvent = await deleteFutureRound(event.id, roundNumber);
       setEvent(nextEvent);
+      setRoundActionInfo("라운드가 삭제되었습니다.");
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "라운드 삭제에 실패했습니다.");
+    } finally {
+      setRoundActionPending(null);
     }
   }
 
@@ -625,9 +660,10 @@ export default function HostEventPage() {
 
           {event.rounds.length > 0 ? (
             <button type="button" onClick={handleAddRound} className="poster-button-secondary mt-4">
-              미래 라운드 추가
+              {roundActionPending === "add" ? "처리 중..." : "라운드 추가생성"}
             </button>
           ) : null}
+          {roundActionInfo ? <div className="mt-3 text-sm text-accentStrong">{roundActionInfo}</div> : null}
         </aside>
 
         <div className="grid gap-6">
@@ -759,26 +795,40 @@ export default function HostEventPage() {
                   <div key={match.id ?? `${round.roundNumber}-${match.court}`} className="border-t border-line py-4">
                     <p className="poster-label">Court {match.court}</p>
                     <div className="mt-3 grid gap-2 text-sm">
-                      <div><span className="mr-3 inline-block w-4 font-bold text-accentStrong">A</span>{match.teamA.map((player) => player.name).join(" / ")}</div>
-                      <div><span className="mr-3 inline-block w-4 font-bold text-ink/75">B</span>{match.teamB.map((player) => player.name).join(" / ")}</div>
+                      <div><span className="mr-3 inline-block w-4 font-bold text-accentStrong">A</span>A팀: {match.teamA.map((player) => player.name).join(" / ")}</div>
+                      <div><span className="mr-3 inline-block w-4 font-bold text-ink/75">B</span>B팀: {match.teamB.map((player) => player.name).join(" / ")}</div>
                     </div>
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <input
-                        type="number"
-                        min={0}
-                        value={match.scoreA ?? ""}
-                        disabled={round.completed}
-                        onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreA", event.target.value)}
-                        className="poster-input disabled:bg-slate-100"
-                      />
-                      <input
-                        type="number"
-                        min={0}
-                        value={match.scoreB ?? ""}
-                        disabled={round.completed}
-                        onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreB", event.target.value)}
-                        className="poster-input disabled:bg-slate-100"
-                      />
+                      <label className="grid gap-2 text-sm font-semibold">
+                        A팀 점수
+                        <select
+                          value={match.scoreA ?? ""}
+                          disabled={round.completed}
+                          onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreA", event.target.value)}
+                          className="poster-input disabled:bg-slate-100"
+                        >
+                          {SCORE_OPTIONS.map((option) => (
+                            <option key={`a-${option || "blank"}`} value={option}>
+                              {option === "" ? "선택" : option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-2 text-sm font-semibold">
+                        B팀 점수
+                        <select
+                          value={match.scoreB ?? ""}
+                          disabled={round.completed}
+                          onChange={(event) => handleScoreChange(round.roundNumber, match.id ?? "", "scoreB", event.target.value)}
+                          className="poster-input disabled:bg-slate-100"
+                        >
+                          {SCORE_OPTIONS.map((option) => (
+                            <option key={`b-${option || "blank"}`} value={option}>
+                              {option === "" ? "선택" : option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                     {match.scoreProposal ? (
                       <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
@@ -871,9 +921,10 @@ export default function HostEventPage() {
                   <button
                     type="button"
                     onClick={() => handleDeleteRound(round.roundNumber)}
+                    disabled={roundActionPending === `delete-${round.roundNumber}`}
                     className="border border-line px-4 py-3 font-semibold"
                   >
-                    미래 라운드 삭제
+                    {roundActionPending === `delete-${round.roundNumber}` ? "처리 중..." : "해당 라운드 삭제"}
                   </button>
                 </div>
               ) : null}

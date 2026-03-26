@@ -7,6 +7,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
+
 function formatNotificationTime(value: string | null | undefined): string {
   if (!value) {
     return "--:--";
@@ -181,6 +183,11 @@ export default function GuestEventPage() {
       return;
     }
 
+    if (scoreDraft.scoreA === "" || scoreDraft.scoreB === "") {
+      setError("A팀과 B팀 점수를 모두 선택해 주세요.");
+      return;
+    }
+
     const scoreA = Number(scoreDraft.scoreA);
     const scoreB = Number(scoreDraft.scoreB);
     if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB)) {
@@ -295,18 +302,34 @@ export default function GuestEventPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                value={scoreDraft.scoreA}
-                onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
-                placeholder={`${teamALabel} 점수`}
-                className="poster-input"
-              />
-              <input
-                value={scoreDraft.scoreB}
-                onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
-                placeholder={`${teamBLabel} 점수`}
-                className="poster-input"
-              />
+              <label className="grid gap-2 text-sm font-semibold">
+                {teamALabel}
+                <select
+                  value={scoreDraft.scoreA}
+                  onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
+                  className="poster-input"
+                >
+                  {SCORE_OPTIONS.map((option) => (
+                    <option key={`guest-a-${option || "blank"}`} value={option}>
+                      {option === "" ? "점수 선택" : option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2 text-sm font-semibold">
+                {teamBLabel}
+                <select
+                  value={scoreDraft.scoreB}
+                  onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
+                  className="poster-input"
+                >
+                  {SCORE_OPTIONS.map((option) => (
+                    <option key={`guest-b-${option || "blank"}`} value={option}>
+                      {option === "" ? "점수 선택" : option}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <button
               type="button"

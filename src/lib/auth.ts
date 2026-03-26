@@ -2,9 +2,34 @@
 
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 import { AuthIdentity, UserProfile } from "@/lib/types";
-import { ensureUserProfile, getProfileByIdentifier, getProfileById } from "@/lib/users";
+import {
+  ensureUserProfile,
+  getProfileByIdentifier,
+  getProfileById,
+  isEmailTaken,
+  isLoginIdTaken,
+} from "@/lib/users";
 
 const DEFAULT_APP_URL = "https://tennis-match-scheduler-nu.vercel.app";
+const LOGIN_ID_PATTERN = /^[A-Za-z0-9]+$/;
+const PROFILE_CACHE_TTL_MS = 15_000;
+
+let currentProfileCache: UserProfile | null | undefined;
+let currentProfileFetchedAt = 0;
+
+function setCurrentProfileCache(profile: UserProfile | null): void {
+  currentProfileCache = profile;
+  currentProfileFetchedAt = Date.now();
+}
+
+function clearCurrentProfileCache(): void {
+  currentProfileCache = undefined;
+  currentProfileFetchedAt = 0;
+}
+
+export function isValidLoginId(loginId: string): boolean {
+  return LOGIN_ID_PATTERN.test(loginId.trim());
+}
 
 export function getAppUrl(): string {
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
@@ -55,21 +80,30 @@ export async function getAuthIdentity(): Promise<AuthIdentity | null> {
 }
 
 export async function getCurrentProfile(): Promise<UserProfile | null> {
+  if (currentProfileCache !== undefined && Date.now() - currentProfileFetchedAt < PROFILE_CACHE_TTL_MS) {
+    return currentProfileCache;
+  }
+
   const identity = await getAuthIdentity();
   if (!identity) {
+    setCurrentProfileCache(null);
     return null;
   }
 
   const current = await getProfileById(identity.id);
   if (current) {
+    setCurrentProfileCache(current);
     return current;
   }
 
-  return ensureUserProfile({
+  const profile = await ensureUserProfile({
     identity,
     loginId: identity.email.split("@")[0],
     displayName: identity.email.split("@")[0],
+    realName: identity.email.split("@")[0],
   });
+  setCurrentProfileCache(profile);
+  return profile;
 }
 
 export async function signUpAccount(input: {
@@ -77,23 +111,32 @@ export async function signUpAccount(input: {
   email: string;
   password: string;
   confirmPassword: string;
-  displayName?: string;
+  realName: string;
+  nickname: string;
 }): Promise<UserProfile> {
   const loginId = input.loginId.trim().toLowerCase();
   const email = input.email.trim().toLowerCase();
-  const displayName = input.displayName?.trim() || loginId;
+  const realName = input.realName.trim();
+  const nickname = input.nickname.trim();
 
-  if (!loginId || !email || !input.password) {
-    throw new Error("아이디, 이메일, 비밀번호를 모두 입력해 주세요.");
+  if (!loginId || !email || !realName || !nickname || !input.password) {
+    throw new Error("이름, 별명, 아이디, 이메일, 비밀번호를 모두 입력해 주세요.");
   }
 
   if (input.password !== input.confirmPassword) {
     throw new Error("비밀번호 확인이 일치하지 않습니다.");
   }
 
-  const existingLoginId = await getProfileByIdentifier(loginId);
-  if (existingLoginId?.loginId === loginId) {
+  if (!isValidLoginId(loginId)) {
+    throw new Error("아이디는 영문과 숫자만 사용할 수 있습니다.");
+  }
+
+  if (await isLoginIdTaken(loginId)) {
     throw new Error("이미 사용 중인 아이디입니다.");
+  }
+
+  if (await isEmailTaken(email)) {
+    throw new Error("이미 가입된 이메일입니다.");
   }
 
   const supabase = requireSupabase();
@@ -106,12 +149,29 @@ export async function signUpAccount(input: {
     throw formatAuthError(error);
   }
 
-  const profile = await ensureUserProfile({
-    identity: { id: data.user.id, email },
-    loginId,
-    displayName,
-  });
+  let profile: UserProfile;
+  try {
+    profile = await ensureUserProfile({
+      identity: { id: data.user.id, email },
+      loginId,
+      displayName: `${realName}(${nickname})`,
+      realName,
+      nickname,
+    });
+  } catch (profileError) {
+    const message = profileError instanceof Error ? profileError.message : "";
+    if (message.toLowerCase().includes("duplicate key") || message.includes("user_profiles_email_key")) {
+      throw new Error("이미 가입된 이메일입니다.");
+    }
 
+    if (message.includes("이미 사용 중인 아이디입니다.")) {
+      throw new Error("이미 사용 중인 아이디입니다.");
+    }
+
+    throw profileError instanceof Error ? profileError : new Error("회원 프로필 생성에 실패했습니다.");
+  }
+
+  setCurrentProfileCache(profile);
   return profile;
 }
 
@@ -142,11 +202,15 @@ export async function signInAccount(identifier: string, password: string): Promi
     throw formatAuthError(error);
   }
 
-  return ensureUserProfile({
+  const nextProfile = await ensureUserProfile({
     identity: { id: data.user.id, email: data.user.email },
     loginId: profile?.loginId,
     displayName: profile?.displayName,
+    realName: profile?.realName,
+    nickname: profile?.nickname,
   });
+  setCurrentProfileCache(nextProfile);
+  return nextProfile;
 }
 
 export async function signOutAccount(): Promise<void> {
@@ -156,6 +220,7 @@ export async function signOutAccount(): Promise<void> {
   }
 
   await supabase.auth.signOut();
+  clearCurrentProfileCache();
 }
 
 export async function requestPasswordReset(identifier: string): Promise<void> {
@@ -248,7 +313,10 @@ export function subscribeAuthChanges(callback: () => void): (() => void) | null 
 
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange(() => callback());
+  } = supabase.auth.onAuthStateChange(() => {
+    clearCurrentProfileCache();
+    callback();
+  });
 
   return () => subscription.unsubscribe();
 }

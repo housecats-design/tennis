@@ -20,6 +20,8 @@ create table if not exists user_profiles (
   user_id text primary key,
   email text not null unique,
   login_id text not null unique,
+  real_name text default '',
+  nickname text default '',
   display_name text not null,
   is_admin boolean default false,
   memo text default '',
