@@ -31,6 +31,24 @@ export function isValidLoginId(loginId: string): boolean {
   return LOGIN_ID_PATTERN.test(loginId.trim());
 }
 
+export async function checkLoginIdAvailability(loginId: string, userId?: string): Promise<boolean> {
+  const normalizedLoginId = loginId.trim().toLowerCase();
+  if (!normalizedLoginId) {
+    return false;
+  }
+
+  return !(await isLoginIdTaken(normalizedLoginId, userId));
+}
+
+export async function checkEmailAvailability(email: string, userId?: string): Promise<boolean> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  return !(await isEmailTaken(normalizedEmail, userId));
+}
+
 export function getAppUrl(): string {
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const windowOrigin = typeof window !== "undefined" ? window.location.origin : "";

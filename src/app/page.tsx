@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  checkEmailAvailability,
+  checkLoginIdAvailability,
   getCurrentProfile,
   isValidLoginId,
   requestPasswordReset,
@@ -15,6 +17,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
+type FieldStatus = "idle" | "checking" | "available" | "taken";
+
 export default function HomePage() {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>("login");
@@ -27,6 +31,9 @@ export default function HomePage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loginIdValidation, setLoginIdValidation] = useState<string | null>(null);
+  const [loginIdStatus, setLoginIdStatus] = useState<FieldStatus>("idle");
+  const [emailValidation, setEmailValidation] = useState<string | null>(null);
+  const [emailStatus, setEmailStatus] = useState<FieldStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -60,9 +67,21 @@ export default function HomePage() {
         setProfile(nextProfile);
         setInfo("로그인되었습니다. 역할을 선택해 이동하세요.");
       } else {
+        const normalizedLoginId = loginId.trim().toLowerCase();
+        const normalizedEmail = email.trim().toLowerCase();
+        const loginIdAvailable = await runLoginIdDuplicateCheck(normalizedLoginId);
+        if (!loginIdAvailable) {
+          throw new Error(loginIdValidation ?? "이미 사용 중인 아이디입니다.");
+        }
+
+        const emailAvailable = await runEmailDuplicateCheck(normalizedEmail);
+        if (!emailAvailable) {
+          throw new Error(emailValidation ?? "이미 가입된 이메일입니다.");
+        }
+
         const nextProfile = await signUpAccount({
-          loginId,
-          email,
+          loginId: normalizedLoginId,
+          email: normalizedEmail,
           realName,
           nickname,
           password,
@@ -103,6 +122,7 @@ export default function HomePage() {
   function handleLoginIdChange(value: string): void {
     const sanitized = value.replace(/[^A-Za-z0-9]/g, "");
     setLoginId(sanitized);
+    setLoginIdStatus("idle");
 
     if (!value.trim()) {
       setLoginIdValidation(null);
@@ -115,6 +135,56 @@ export default function HomePage() {
     }
 
     setLoginIdValidation(null);
+  }
+
+  async function runLoginIdDuplicateCheck(value: string): Promise<boolean> {
+    const normalizedLoginId = value.trim().toLowerCase();
+    if (!normalizedLoginId) {
+      setLoginIdValidation(null);
+      setLoginIdStatus("idle");
+      return false;
+    }
+
+    if (!isValidLoginId(normalizedLoginId)) {
+      setLoginIdValidation("아이디는 영문과 숫자만 사용할 수 있습니다.");
+      setLoginIdStatus("taken");
+      return false;
+    }
+
+    setLoginIdStatus("checking");
+    const available = await checkLoginIdAvailability(normalizedLoginId);
+    if (available) {
+      setLoginIdValidation("사용 가능한 아이디입니다.");
+      setLoginIdStatus("available");
+      return true;
+    }
+
+    setLoginIdValidation("이미 사용 중인 아이디입니다.");
+    setLoginIdStatus("taken");
+    return false;
+  }
+
+  async function runEmailDuplicateCheck(value: string): Promise<boolean> {
+    const normalizedEmail = value.trim().toLowerCase();
+    setEmail(normalizedEmail);
+
+    if (!normalizedEmail) {
+      setEmailValidation(null);
+      setEmailStatus("idle");
+      return false;
+    }
+
+    setEmailStatus("checking");
+    const available = await checkEmailAvailability(normalizedEmail);
+    if (available) {
+      setEmailValidation("사용 가능한 이메일입니다.");
+      setEmailStatus("available");
+      return true;
+    }
+
+    setEmailValidation("이미 가입된 이메일입니다.");
+    setEmailStatus("taken");
+    return false;
   }
 
   return (
@@ -218,12 +288,56 @@ export default function HomePage() {
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   아이디
-                  <input value={loginId} onChange={(event) => handleLoginIdChange(event.target.value)} className="poster-input" />
-                  {loginIdValidation ? <span className="text-xs font-medium text-red-700">{loginIdValidation}</span> : null}
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      value={loginId}
+                      onChange={(event) => handleLoginIdChange(event.target.value)}
+                      className="poster-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void runLoginIdDuplicateCheck(loginId)}
+                      disabled={!loginId.trim() || loginIdStatus === "checking"}
+                      className="poster-button-secondary whitespace-nowrap disabled:opacity-60"
+                    >
+                      {loginIdStatus === "checking" ? "확인 중..." : "중복 확인"}
+                    </button>
+                  </div>
+                  {loginIdStatus === "checking" ? <span className="text-xs font-medium text-ink/60">아이디를 확인하는 중...</span> : null}
+                  {loginIdValidation ? (
+                    <span className={`text-xs font-medium ${loginIdStatus === "available" ? "text-accentStrong" : "text-red-700"}`}>
+                      {loginIdValidation}
+                    </span>
+                  ) : null}
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   이메일
-                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="poster-input" />
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(event) => {
+                        setEmail(event.target.value);
+                        setEmailStatus("idle");
+                        setEmailValidation(null);
+                      }}
+                      className="poster-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void runEmailDuplicateCheck(email)}
+                      disabled={!email.trim() || emailStatus === "checking"}
+                      className="poster-button-secondary whitespace-nowrap disabled:opacity-60"
+                    >
+                      {emailStatus === "checking" ? "확인 중..." : "중복 확인"}
+                    </button>
+                  </div>
+                  {emailStatus === "checking" ? <span className="text-xs font-medium text-ink/60">이메일을 확인하는 중...</span> : null}
+                  {emailValidation ? (
+                    <span className={`text-xs font-medium ${emailStatus === "available" ? "text-accentStrong" : "text-red-700"}`}>
+                      {emailValidation}
+                    </span>
+                  ) : null}
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   비밀번호
