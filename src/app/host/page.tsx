@@ -121,7 +121,7 @@ export default function HostPage() {
       </div>
 
       <div className="mb-8 flex flex-wrap gap-3 border-t border-line py-4">
-        <Link href="/" className="poster-button-secondary">역할 선택</Link>
+        <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         <Link href="/history/host" className="poster-button-secondary">호스트 이력</Link>
         <Link href="/history/player" className="poster-button-secondary">내 기록</Link>
         {profile.isAdmin ? <Link href="/admin" className="poster-button-secondary">관리자</Link> : null}

@@ -281,6 +281,11 @@ export default function GuestEventPage() {
   return (
     <main className="poster-page max-w-4xl">
       <div className="mb-6 flex flex-wrap gap-3">
+        {currentEvent?.status === "completed" ? (
+          <Link href="/" className="poster-button-secondary">
+            메인페이지 이동
+          </Link>
+        ) : null}
         <Link href="/guest" className="poster-button-secondary">
           다른 이벤트 참여
         </Link>

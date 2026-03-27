@@ -8,6 +8,7 @@ export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
 export type AppRole = "host" | "player";
 export type AuthMode = "login" | "signup";
 export type UserRole = "member" | "admin";
+export type ClubRole = "owner" | "manager" | "member";
 export type ParticipantSource = "host" | "joined" | "member" | "manual";
 export type RoundCloseReason = "completed" | "force_closed" | "skipped";
 
@@ -244,4 +245,25 @@ export type AdminUserSummary = {
   pointsScored: number;
   pointsAllowed: number;
   pointDiff: number;
+};
+
+export type Club = {
+  id: string;
+  clubName: string;
+  description?: string | null;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  isActive?: boolean;
+  deletedAt?: string | null;
+};
+
+export type ClubMember = {
+  id: string;
+  clubId: string;
+  userId: string;
+  role: ClubRole;
+  joinedAt: string;
+  isActive?: boolean;
+  deletedAt?: string | null;
 };

@@ -195,19 +195,15 @@ export default function HomePage() {
         <div>
           <p className="poster-label">Tennis Match Scheduler</p>
           <h1 className="mt-4 max-w-3xl text-5xl font-black tracking-[-0.04em] text-ink sm:text-6xl">
-            Club Operation,
-            <br />
-            Match History,
-            <br />
-            Final Ranking
+            메인 페이지
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-ink/68">
-            계정 로그인 후 호스트와 플레이어 역할을 선택해 이벤트 생성, 참가, 저장 이력,
-            최종 랭킹, 관리자 통계를 하나의 흐름으로 운영합니다.
+            계정 로그인 후 메인 페이지에서 호스트와 플레이어 역할을 선택해 이벤트 생성, 참가,
+            저장 이력, 최종 랭킹, 관리자 통계를 하나의 흐름으로 운영합니다.
           </p>
 
           {profile ? (
-            <div className="mt-8 border-t border-line pt-6">
+        <div className="mt-8 border-t border-line pt-6">
               <div className="text-sm text-ink/70">
                 로그인됨: <span className="font-semibold text-ink">{profile.displayName}</span> · {profile.email}
               </div>
@@ -234,7 +230,7 @@ export default function HomePage() {
                 </button>
               </div>
               {lastRole ? (
-                <div className="mt-4 text-xs text-ink/55">최근 선택 역할: {lastRole === "host" ? "호스트" : "플레이어"}</div>
+                <div className="mt-4 text-xs text-ink/55">메인 페이지 최근 선택 역할: {lastRole === "host" ? "호스트" : "플레이어"}</div>
               ) : null}
             </div>
           ) : null}

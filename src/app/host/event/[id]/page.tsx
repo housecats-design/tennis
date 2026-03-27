@@ -496,7 +496,7 @@ export default function HostEventPage() {
 
         <div className="flex flex-wrap gap-3">
           <Link href="/" className="poster-button-secondary">
-            역할 선택
+            메인 페이지
           </Link>
           <Link href="/history/host" className="poster-button-secondary">
             호스트 이력
@@ -747,6 +747,11 @@ export default function HostEventPage() {
 
           {event.status === "completed" ? (
             <section className="border-t border-line py-6">
+              <div className="mb-5 flex flex-wrap gap-3">
+                <Link href="/" className="poster-button-secondary">
+                  메인페이지 이동
+                </Link>
+              </div>
               <h2 className="text-3xl font-black">최종 결과</h2>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
                 {finalRanking.slice(0, 3).map((player) => (

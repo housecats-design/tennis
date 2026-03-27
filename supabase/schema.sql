@@ -31,6 +31,27 @@ create table if not exists user_profiles (
   updated_at timestamptz default now()
 );
 
+create table if not exists clubs (
+  id text primary key,
+  club_name text not null,
+  description text,
+  created_by_user_id text not null,
+  is_active boolean default true,
+  deleted_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists club_members (
+  id text primary key,
+  club_id text references clubs(id) on delete cascade,
+  user_id text not null,
+  role text not null,
+  is_active boolean default true,
+  deleted_at timestamptz,
+  joined_at timestamptz default now()
+);
+
 create table if not exists participants (
   id text primary key,
   event_id text references events(id) on delete cascade,
