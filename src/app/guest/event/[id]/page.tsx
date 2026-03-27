@@ -1,6 +1,7 @@
 "use client";
 
 import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent } from "@/lib/events";
+import { buildFinalRanking } from "@/lib/history";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
 import { Notification } from "@/lib/types";
 import Link from "next/link";
@@ -65,6 +66,10 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
   };
 }
 
+function isStandardScore(scoreA: number, scoreB: number): boolean {
+  return (scoreA === 6 && scoreB >= 0 && scoreB <= 5) || (scoreB === 6 && scoreA >= 0 && scoreA <= 5);
+}
+
 export default function GuestEventPage() {
   const params = useParams<{ id: string }>();
   const eventId = typeof params.id === "string" ? params.id : "";
@@ -75,6 +80,7 @@ export default function GuestEventPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
+  const [pendingCustomScore, setPendingCustomScore] = useState<{ scoreA: number; scoreB: number } | null>(null);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -160,6 +166,13 @@ export default function GuestEventPage() {
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
   const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
+  const finalRanking = useMemo(() => (currentEvent?.status === "completed" ? buildFinalRanking(currentEvent) : []), [currentEvent]);
+  const hasAcceptedProposal = Boolean(
+    participantId && currentMatch?.scoreProposal?.acceptedByParticipantIds.includes(participantId),
+  );
+  const hasDisputedProposal = Boolean(
+    participantId && currentMatch?.scoreProposal?.disputedByParticipantIds.includes(participantId),
+  );
 
   useEffect(() => {
     const unreadCount = notifications.filter((notification) => !notification.readAt).length;
@@ -178,6 +191,19 @@ export default function GuestEventPage() {
     }
   }, [assignment.body, assignment.title, notifications, participantId]);
 
+  async function submitProposalScores(scoreA: number, scoreB: number): Promise<void> {
+    if (!eventId || !currentRound || !currentMatch || !participantId) {
+      return;
+    }
+
+    await submitMatchScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, {
+      scoreA,
+      scoreB,
+    });
+    setScoreDraft({ scoreA: "", scoreB: "" });
+    setPendingCustomScore(null);
+  }
+
   async function handleSubmitProposal(): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
       return;
@@ -195,11 +221,12 @@ export default function GuestEventPage() {
       return;
     }
 
-    await submitMatchScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, {
-      scoreA,
-      scoreB,
-    });
-    setScoreDraft({ scoreA: "", scoreB: "" });
+    if (!isStandardScore(scoreA, scoreB)) {
+      setPendingCustomScore({ scoreA, scoreB });
+      return;
+    }
+
+    await submitProposalScores(scoreA, scoreB);
   }
 
   async function handleProposalResponse(response: "accept" | "dispute"): Promise<void> {
@@ -208,6 +235,9 @@ export default function GuestEventPage() {
     }
 
     await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response);
+    if (response === "accept") {
+      window.alert("확인되었습니다.");
+    }
   }
 
   async function handleRead(notificationId: string): Promise<void> {
@@ -265,6 +295,11 @@ export default function GuestEventPage() {
         <p className="poster-label">Player Status</p>
         <h1 className="mt-3 text-4xl font-black tracking-[-0.04em]">{assignment.title}</h1>
         <p className="mt-4 text-sm leading-6 text-ink/72">{assignment.body}</p>
+        {currentMatch && currentRound ? (
+          <div className="mt-4 text-lg font-semibold text-accentStrong">
+            Round {currentRound.roundNumber} / Court {currentMatch.court}
+          </div>
+        ) : null}
         {participantMeta && currentEvent && participantId ? (
           <div className="mt-5 grid gap-2 border-t border-line pt-4 text-sm text-ink/75 sm:grid-cols-3">
             <div>이름: {participantMeta.name}</div>
@@ -339,22 +374,51 @@ export default function GuestEventPage() {
               점수 제출
             </button>
 
+            {pendingCustomScore ? (
+              <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">
+                <div className="font-semibold">이대로 반영할까요?</div>
+                <div className="mt-2">
+                  {teamALabel} {pendingCustomScore.scoreA} : {teamBLabel} {pendingCustomScore.scoreB}
+                </div>
+                <div className="mt-3 flex gap-3">
+                  <button type="button" onClick={() => void submitProposalScores(pendingCustomScore.scoreA, pendingCustomScore.scoreB)} className="poster-button-secondary">
+                    반영한다
+                  </button>
+                  <button type="button" onClick={() => setPendingCustomScore(null)} className="border border-line px-4 py-3 font-semibold">
+                    다시 선택
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {currentMatch.scoreProposal ? (
               <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">
                 <div className="font-semibold">이 점수가 맞습니까?</div>
                 <div className="mt-2">{teamALabel} {currentMatch.scoreProposal.scoreA} : {teamBLabel} {currentMatch.scoreProposal.scoreB}</div>
                 {currentMatch.scoreProposal.submittedByParticipantId !== participantId ? (
                   <div className="mt-3 flex gap-3">
-                    <button type="button" onClick={() => void handleProposalResponse("accept")} className="poster-button-secondary">
+                    <button
+                      type="button"
+                      onClick={() => void handleProposalResponse("accept")}
+                      disabled={hasAcceptedProposal || hasDisputedProposal}
+                      className="poster-button-secondary disabled:opacity-60"
+                    >
                       수락
                     </button>
-                    <button type="button" onClick={() => void handleProposalResponse("dispute")} className="border border-red-200 px-4 py-3 font-semibold text-red-700">
+                    <button
+                      type="button"
+                      onClick={() => void handleProposalResponse("dispute")}
+                      disabled={hasAcceptedProposal || hasDisputedProposal}
+                      className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
+                    >
                       이의신청
                     </button>
                   </div>
                 ) : (
                   <div className="mt-3 text-xs text-ink/70">다른 선수들의 확인을 기다리는 중입니다.</div>
                 )}
+                {hasAcceptedProposal ? <div className="mt-3 text-xs font-semibold text-accentStrong">내 확인이 반영되었습니다.</div> : null}
+                {hasDisputedProposal ? <div className="mt-3 text-xs font-semibold text-red-700">이의신청이 접수되었습니다.</div> : null}
               </div>
             ) : null}
           </div>
@@ -413,6 +477,19 @@ export default function GuestEventPage() {
             </div>
           )}
         </div>
+
+        {currentEvent?.status === "completed" ? (
+          <div className="mt-8 border-t border-line pt-6">
+            <div className="text-xl font-black">이벤트 최종 리더보드</div>
+            <div className="mt-3 space-y-2 text-sm">
+              {finalRanking.slice(0, 5).map((player) => (
+                <div key={player.participantId} className="border-b border-line py-2">
+                  {player.rank}등 · {player.name} · 승 {player.stats.wins} / 득점 {player.stats.pointsScored}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
     </main>
   );

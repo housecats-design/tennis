@@ -51,6 +51,15 @@ function saveCachedProfiles(profiles: UserProfile[]): void {
   window.localStorage.setItem(USER_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
 }
 
+function isUserProfilesSchemaMismatch(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("schema cache") &&
+    normalized.includes("user_profiles") &&
+    (normalized.includes("nickname") || normalized.includes("real_name") || normalized.includes("display_name"))
+  );
+}
+
 export function formatProfileDisplayName(realName?: string | null, nickname?: string | null, fallback?: string | null): string {
   const normalizedRealName = realName?.trim() ?? "";
   const normalizedNickname = nickname?.trim() ?? "";
@@ -136,6 +145,10 @@ async function loadProfileByField(
     .select("user_id, email, login_id, real_name, nickname, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .eq(field, value)
     .maybeSingle();
+
+  if (error && isUserProfilesSchemaMismatch(error.message)) {
+    throw new Error("Supabase user_profiles 스키마가 최신 앱 구조와 다릅니다. real_name, nickname, display_name 컬럼 마이그레이션이 필요합니다.");
+  }
 
   if (error || !data) {
     return loadCachedProfiles().find((profile) => {
@@ -309,6 +322,9 @@ export async function ensureUserProfile(input: {
   }
 
   if (error) {
+    if (isUserProfilesSchemaMismatch(error.message ?? "")) {
+      throw new Error("Supabase user_profiles 스키마가 최신 앱 구조와 다릅니다. real_name, nickname, display_name 컬럼을 먼저 추가해 주세요.");
+    }
     throw new Error(error.message);
   }
 

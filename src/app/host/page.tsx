@@ -2,7 +2,7 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { createEvent } from "@/lib/events";
-import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
+import { loadLastRole, saveLastEvent, saveLastParticipant } from "@/lib/storage";
 import { RoundViewMode, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -27,13 +27,18 @@ export default function HostPage() {
   useEffect(() => {
     const sync = async () => {
       const nextProfile = await getCurrentProfile();
+      const lastRole = loadLastRole();
+      if (nextProfile && lastRole === "player") {
+        router.replace("/guest");
+        return;
+      }
       setProfile(nextProfile);
       setHostName(nextProfile?.displayName ?? "");
       setCheckingAuth(false);
     };
 
     void sync();
-  }, []);
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

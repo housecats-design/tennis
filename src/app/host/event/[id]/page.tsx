@@ -15,6 +15,7 @@ import {
   markEventSaved,
   reassignRound,
   reassignSingleMatch,
+  respondToScoreProposal,
   saveParticipants,
   skipMatch,
   subscribeToEvent,
@@ -23,10 +24,11 @@ import {
 import { buildFinalRanking, saveCompletedEventRecord } from "@/lib/history";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
+import { loadLastRole } from "@/lib/storage";
 import { listProfiles } from "@/lib/users";
 import { Participant, PlayerStats, SkillLevel, UserProfile } from "@/lib/types";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
@@ -51,6 +53,7 @@ function getRoundAccentClass(roundNumber: number): string {
 
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const eventId = typeof params.id === "string" ? params.id : "";
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [loading, setLoading] = useState(true);
@@ -92,6 +95,11 @@ export default function HostEventPage() {
           listProfiles(),
           loadEvent(eventId),
         ]);
+        const lastRole = loadLastRole();
+        if (!nextProfile || lastRole === "player" || (nextEvent && nextEvent.hostUserId !== nextProfile.id)) {
+          router.replace(nextEvent ? `/guest/event/${nextEvent.id}` : "/");
+          return;
+        }
         setProfile(nextProfile);
         setMembers(nextMembers);
         setEvent(nextEvent);
@@ -111,7 +119,7 @@ export default function HostEventPage() {
       window.clearInterval(interval);
       unsubscribe();
     };
-  }, [eventId]);
+  }, [eventId, router]);
 
   const participantsEditable = event ? canEditParticipants(event) : false;
   const joinUrl = useMemo(() => (event ? getJoinUrl(event.id) : ""), [event]);
@@ -161,6 +169,10 @@ export default function HostEventPage() {
     return members.filter((member) => !member.isDeleted && member.id !== profile?.id && !existingUserIds.has(member.id));
   }, [event?.participants, members, profile?.id]);
   const finalRanking = useMemo(() => (event?.status === "completed" ? buildFinalRanking(event) : []), [event]);
+  const hostParticipantId = useMemo(
+    () => event?.participants.find((participant) => participant.role === "host")?.id ?? null,
+    [event],
+  );
 
   async function refreshEvent(): Promise<void> {
     if (!eventId) {
@@ -408,6 +420,15 @@ export default function HostEventPage() {
     }
 
     const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, { scoreA, scoreB });
+    setEvent(nextEvent);
+  }
+
+  async function handleHostProposalResponse(roundNumber: number, matchId: string, response: "accept" | "dispute"): Promise<void> {
+    if (!event || !hostParticipantId) {
+      return;
+    }
+
+    const nextEvent = await respondToScoreProposal(event.id, roundNumber, matchId, hostParticipantId, response);
     setEvent(nextEvent);
   }
 
@@ -839,6 +860,22 @@ export default function HostEventPage() {
                         제출 점수 {match.scoreProposal.scoreA}:{match.scoreProposal.scoreB} /
                         상태 {match.scoreProposal.status === "pending" ? "확인 대기" : match.scoreProposal.status === "accepted" ? "확정" : "이의신청"}
                         <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleHostProposalResponse(round.roundNumber, match.id ?? "", "accept")}
+                            disabled={round.completed}
+                            className="border border-accentStrong px-3 py-2 text-xs font-semibold text-accentStrong disabled:opacity-50"
+                          >
+                            수락
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleHostProposalResponse(round.roundNumber, match.id ?? "", "dispute")}
+                            disabled={round.completed}
+                            className="border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
+                          >
+                            이의신청
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleApplyProposal(round.roundNumber, match.id ?? "", match.scoreProposal?.scoreA ?? 0, match.scoreProposal?.scoreB ?? 0)}

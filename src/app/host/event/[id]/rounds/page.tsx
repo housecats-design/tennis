@@ -1,12 +1,15 @@
 "use client";
 
+import { getCurrentProfile } from "@/lib/auth";
 import { loadEvent, subscribeToEvent } from "@/lib/events";
+import { loadLastRole } from "@/lib/storage";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function HostRoundsPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const eventId = typeof params.id === "string" ? params.id : "";
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [loading, setLoading] = useState(true);
@@ -19,7 +22,13 @@ export default function HostRoundsPage() {
 
     const refresh = async () => {
       try {
-        setEvent(await loadEvent(eventId));
+        const [profile, nextEvent] = await Promise.all([getCurrentProfile(), loadEvent(eventId)]);
+        const lastRole = loadLastRole();
+        if (!profile || lastRole === "player" || (nextEvent && nextEvent.hostUserId !== profile.id)) {
+          router.replace(nextEvent ? `/guest/event/${nextEvent.id}` : "/");
+          return;
+        }
+        setEvent(nextEvent);
       } finally {
         setLoading(false);
       }
@@ -32,7 +41,7 @@ export default function HostRoundsPage() {
       window.clearInterval(interval);
       unsubscribe();
     };
-  }, [eventId]);
+  }, [eventId, router]);
 
   if (loading) {
     return (

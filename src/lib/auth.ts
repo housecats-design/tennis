@@ -4,7 +4,6 @@ import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 import { AuthIdentity, UserProfile } from "@/lib/types";
 import {
   ensureUserProfile,
-  getProfileByIdentifier,
   getProfileById,
   isEmailTaken,
   isLoginIdTaken,
@@ -194,20 +193,13 @@ export async function signUpAccount(input: {
 }
 
 export async function signInAccount(identifier: string, password: string): Promise<UserProfile> {
-  const normalizedIdentifier = identifier.trim().toLowerCase();
-  if (!normalizedIdentifier || !password) {
-    throw new Error("아이디 또는 이메일과 비밀번호를 입력해 주세요.");
+  const email = identifier.trim().toLowerCase();
+  if (!email || !password) {
+    throw new Error("이메일과 비밀번호를 입력해 주세요.");
   }
 
-  const profile = normalizedIdentifier.includes("@")
-    ? await getProfileByIdentifier(normalizedIdentifier)
-    : await getProfileByIdentifier(normalizedIdentifier);
-  const email = normalizedIdentifier.includes("@")
-    ? normalizedIdentifier
-    : profile?.email ?? "";
-
-  if (!email) {
-    throw new Error("가입된 아이디 또는 이메일을 찾을 수 없습니다.");
+  if (!email.includes("@")) {
+    throw new Error("이메일 형식으로 입력해 주세요.");
   }
 
   const supabase = requireSupabase();
@@ -222,10 +214,10 @@ export async function signInAccount(identifier: string, password: string): Promi
 
   const nextProfile = await ensureUserProfile({
     identity: { id: data.user.id, email: data.user.email },
-    loginId: profile?.loginId,
-    displayName: profile?.displayName,
-    realName: profile?.realName,
-    nickname: profile?.nickname,
+    loginId: undefined,
+    displayName: undefined,
+    realName: undefined,
+    nickname: undefined,
   });
   setCurrentProfileCache(nextProfile);
   return nextProfile;
@@ -242,20 +234,13 @@ export async function signOutAccount(): Promise<void> {
 }
 
 export async function requestPasswordReset(identifier: string): Promise<void> {
-  const normalizedIdentifier = identifier.trim().toLowerCase();
-  if (!normalizedIdentifier) {
-    throw new Error("아이디 또는 이메일을 입력해 주세요.");
+  const email = identifier.trim().toLowerCase();
+  if (!email) {
+    throw new Error("이메일을 입력해 주세요.");
   }
 
-  const profile = normalizedIdentifier.includes("@")
-    ? await getProfileByIdentifier(normalizedIdentifier)
-    : await getProfileByIdentifier(normalizedIdentifier);
-  const email = normalizedIdentifier.includes("@")
-    ? normalizedIdentifier
-    : profile?.email ?? "";
-
-  if (!email) {
-    throw new Error("가입된 아이디 또는 이메일을 찾을 수 없습니다.");
+  if (!email.includes("@")) {
+    throw new Error("이메일 형식으로 입력해 주세요.");
   }
 
   const supabase = requireSupabase();

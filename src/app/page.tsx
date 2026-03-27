@@ -88,6 +88,8 @@ export default function HomePage() {
           confirmPassword,
         });
         setProfile(nextProfile);
+        window.alert("회원가입이 완료되었습니다.");
+        router.replace("/");
         setInfo("회원가입이 완료되었습니다. 역할을 선택해 이동하세요.");
       }
     } catch (submitError) {
@@ -260,7 +262,7 @@ export default function HomePage() {
             {mode === "login" ? (
               <>
                 <label className="grid gap-2 text-sm font-semibold">
-                  아이디 또는 이메일
+                  이메일
                   <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="poster-input" />
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">

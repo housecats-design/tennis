@@ -642,6 +642,22 @@ function isValidScore(scoreA: number | null | undefined, scoreB: number | null |
   );
 }
 
+function hasConfirmedNonStandardScore(match: Round["matches"][number]): boolean {
+  return Boolean(
+    match.scoreProposal?.status === "accepted" &&
+    Number.isInteger(match.scoreA) &&
+    Number.isInteger(match.scoreB),
+  );
+}
+
+function canFinalizeMatch(match: Round["matches"][number]): boolean {
+  if (match.skipped) {
+    return true;
+  }
+
+  return isValidScore(match.scoreA, match.scoreB) || hasConfirmedNonStandardScore(match);
+}
+
 function getMatchParticipantIds(round: Round, matchId: string): string[] {
   const match = safeArray(round.matches).find((item) => item.id === matchId);
   if (!match) {
@@ -653,7 +669,7 @@ function getMatchParticipantIds(round: Round, matchId: string): string[] {
 
 function isConfirmationRequiredParticipant(event: EventRecord, participantId: string): boolean {
   const participant = safeArray(event.participants).find((item) => item.id === participantId);
-  return Boolean(participant && participant.source === "joined" && participant.userId);
+  return Boolean(participant && participant.userId && (participant.source === "joined" || participant.source === "host"));
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -668,11 +684,7 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
   }
 
   for (const match of targetRound.matches) {
-    if (match.skipped) {
-      continue;
-    }
-
-    if (!isValidScore(match.scoreA, match.scoreB)) {
+    if (!canFinalizeMatch(match)) {
       throw new Error("현재 라운드의 모든 경기는 6:0부터 6:5 사이의 완료 점수여야 합니다.");
     }
   }
@@ -797,7 +809,7 @@ export async function respondToScoreProposal(
   participantId: string,
   response: "accept" | "dispute",
 ): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) => {
+  const nextEvent = await updateEvent(eventId, (event) => {
     const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
 
     return withDerivedEventState({
@@ -840,14 +852,17 @@ export async function respondToScoreProposal(
                 ? Array.from(new Set([...match.scoreProposal.disputedByParticipantIds, participantId]))
                 : match.scoreProposal.disputedByParticipantIds;
 
-            const requiredAcceptCount = Math.max(
-              participantIds.filter(
-                (id) =>
-                  id !== match.scoreProposal?.submittedByParticipantId &&
-                  isConfirmationRequiredParticipant(event, id),
-              ).length,
-              0,
-            );
+            const requiredAcceptCount =
+              participantIds.length >= 4
+                ? 2
+                : Math.max(
+                    participantIds.filter(
+                      (id) =>
+                        id !== match.scoreProposal?.submittedByParticipantId &&
+                        isConfirmationRequiredParticipant(event, id),
+                    ).length,
+                    0,
+                  );
             const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
 
             return {
@@ -870,6 +885,17 @@ export async function respondToScoreProposal(
       }),
     });
   });
+
+  if (!nextEvent) {
+    return null;
+  }
+
+  const updatedRound = safeArray(nextEvent.rounds).find((round) => round.roundNumber === roundNumber);
+  if (updatedRound && !updatedRound.completed && updatedRound.matches.every((match) => canFinalizeMatch(match))) {
+    return finalizeRound(eventId, roundNumber);
+  }
+
+  return nextEvent;
 }
 
 export async function skipMatch(eventId: string, roundNumber: number, matchId: string): Promise<EventRecord | null> {
