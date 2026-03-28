@@ -33,6 +33,9 @@ export default function SavedEventDetailPage() {
         <p className="poster-label">Saved Event</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">{savedEvent.eventName}</h1>
         <div className="mt-4 text-sm text-ink/65">{new Date(savedEvent.savedAt).toLocaleString("ko-KR")}</div>
+        <div className="mt-3 text-sm text-ink/60">
+          {savedEvent.eventType === "club" ? `클럽 이벤트${savedEvent.clubName ? ` · ${savedEvent.clubName}` : ""}` : "개인 이벤트"}
+        </div>
       </section>
 
       <section className="border-t border-line py-6">
@@ -58,6 +61,7 @@ export default function SavedEventDetailPage() {
                 <th>이름</th>
                 <th>성별</th>
                 <th>NTRP</th>
+                <th>참가 클럽</th>
                 <th>승</th>
                 <th>패</th>
                 <th>득점</th>
@@ -72,6 +76,7 @@ export default function SavedEventDetailPage() {
                   <td className="font-semibold">{player.name}</td>
                   <td>{player.gender === "male" ? "남성" : player.gender === "female" ? "여성" : "미정"}</td>
                   <td>{typeof player.guestNtrp === "number" ? player.guestNtrp.toFixed(1) : "-"}</td>
+                  <td>{player.joinedAsClubName ?? "-"}</td>
                   <td>{player.stats.wins}</td>
                   <td>{player.stats.losses}</td>
                   <td>{player.stats.pointsScored}</td>

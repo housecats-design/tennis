@@ -325,7 +325,7 @@ export default function HomePage() {
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-ink/68">
             계정 로그인 후 메인 페이지에서 호스트와 플레이어 역할을 선택해 이벤트 생성, 참가,
-            저장 이력, 최종 랭킹, 관리자 통계를 하나의 흐름으로 운영합니다.
+            저장 이력, 최종 랭킹, 관리자 통계, 클럽 기능을 하나의 흐름으로 운영합니다.
           </p>
 
           {profile ? (
@@ -353,6 +353,9 @@ export default function HomePage() {
                 ) : null}
                 <Link href="/profile" className="poster-button-secondary">
                   프로필 설정
+                </Link>
+                <Link href="/clubs" className="poster-button-secondary">
+                  클럽
                 </Link>
                 {resumeEventId ? (
                   <button

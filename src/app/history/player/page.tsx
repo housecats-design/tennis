@@ -61,6 +61,13 @@ export default function PlayerHistoryPage() {
                 <div>
                   <div className="text-xl font-black">{event.eventName}</div>
                   <div className="mt-2 text-sm text-ink/65">{new Date(event.savedAt).toLocaleString("ko-KR")}</div>
+                  <div className="mt-2 text-sm text-ink/60">
+                    {current?.joinedAsClubName
+                      ? `참가 클럽 · ${current.joinedAsClubName}`
+                      : event.eventType === "club"
+                        ? `클럽 이벤트${event.clubName ? ` · ${event.clubName}` : ""}`
+                        : "개인 이벤트"}
+                  </div>
                   <div className="mt-2 text-sm text-ink/68">
                     {current ? `승 ${current.stats.wins} / 패 ${current.stats.losses} / 득점 ${current.stats.pointsScored} / 휴식 ${current.stats.rests} / 순위 ${current.rank}등` : "개인 기록 없음"}
                   </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
+import { getClubById } from "@/lib/clubs";
 import { canAccessEventAsHost, loadEvent, subscribeToEvent } from "@/lib/events";
 import { buildMatchHistory, sortLeaderboard } from "@/lib/leaderboard";
 import { Player, SortDirection, UserProfile } from "@/lib/types";
@@ -14,6 +15,7 @@ export default function EventLeaderboardPage() {
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [eventClubName, setEventClubName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) {
@@ -34,6 +36,15 @@ export default function EventLeaderboardPage() {
       unsubscribe();
     };
   }, [eventId]);
+
+  useEffect(() => {
+    if (!event?.clubId) {
+      setEventClubName(null);
+      return;
+    }
+
+    void getClubById(event.clubId).then((club) => setEventClubName(club?.clubName ?? null));
+  }, [event?.clubId]);
 
   const rankedPlayers = useMemo(() => {
     if (!event) {
@@ -73,6 +84,10 @@ export default function EventLeaderboardPage() {
         <div className="mb-4">
           <p className="poster-label">Leaderboard</p>
           <h1 className="mt-2 text-4xl font-black tracking-[-0.04em]">누적 리더보드</h1>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold tracking-[0.16em] text-ink/55 uppercase">
+            <span>{event.eventType === "club" ? "CLUB EVENT" : "PERSONAL EVENT"}</span>
+            {eventClubName ? <span>· {eventClubName}</span> : null}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="poster-table min-w-full text-left text-sm">

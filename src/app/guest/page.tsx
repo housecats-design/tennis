@@ -1,6 +1,7 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
+import { getClubById, listMyClubMemberships } from "@/lib/clubs";
 import { findEventByCodeOrName, getInvitationById, joinEvent, loadEvent } from "@/lib/events";
 import { saveLastEvent, saveLastParticipant, savePostLoginRedirect } from "@/lib/storage";
 import { ParticipantGender, UserProfile } from "@/lib/types";
@@ -17,10 +18,12 @@ export default function GuestPage() {
   const [displayName, setDisplayName] = useState("");
   const [gender, setGender] = useState<ParticipantGender | "">("");
   const [guestNtrp, setGuestNtrp] = useState(3.5);
+  const [joinedAsClubId, setJoinedAsClubId] = useState("");
   const [eventQuery, setEventQuery] = useState("");
   const [inviteId, setInviteId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [availableClubs, setAvailableClubs] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     const sync = async () => {
@@ -29,6 +32,17 @@ export default function GuestPage() {
       setDisplayName(currentProfile?.displayName ?? "");
       setGender(currentProfile?.gender && currentProfile.gender !== "unspecified" ? currentProfile.gender : "");
       setGuestNtrp(currentProfile?.defaultNtrp ?? 3.5);
+      if (currentProfile?.id) {
+        const memberships = await listMyClubMemberships(currentProfile.id);
+        const approvedMemberships = memberships.filter((membership) => membership.membershipStatus === "approved" && membership.leftAt == null);
+        const clubs = await Promise.all(
+          approvedMemberships.map(async (membership) => {
+            const club = await getClubById(membership.clubId);
+            return club ? { id: club.id, name: club.clubName } : null;
+          }),
+        );
+        setAvailableClubs(clubs.filter(Boolean) as Array<{ id: string; name: string }>);
+      }
       setCheckingAuth(false);
     };
 
@@ -82,6 +96,14 @@ export default function GuestPage() {
             return;
           }
 
+          if (targetEvent.eventType === "club" && targetEvent.clubId) {
+            const hasClubMembership = availableClubs.some((club) => club.id === targetEvent.clubId);
+            if (!hasClubMembership) {
+              setError("이 클럽 이벤트는 해당 클럽 승인 회원만 참가할 수 있습니다.");
+              return;
+            }
+          }
+
           const invitation = getInvitationById(targetEvent, inviteId);
           if (!invitation) {
             setError("만료되었거나 유효하지 않은 초대 링크입니다.");
@@ -92,6 +114,7 @@ export default function GuestPage() {
             displayName: profile.displayName,
             gender: profile.gender,
             guestNtrp: profile.defaultNtrp ?? null,
+            joinedAsClubId: targetEvent.eventType === "club" ? targetEvent.clubId ?? null : null,
             userId: profile.id,
             inviteId,
           });
@@ -112,7 +135,7 @@ export default function GuestPage() {
     };
 
     void autoJoin();
-  }, [checkingAuth, eventQuery, inviteId, profile, router]);
+  }, [availableClubs, checkingAuth, eventQuery, inviteId, profile, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -141,10 +164,22 @@ export default function GuestPage() {
         return;
       }
 
+      if (targetEvent.eventType === "club") {
+        if (!targetEvent.clubId) {
+          setError("클럽 이벤트 정보가 올바르지 않습니다.");
+          return;
+        }
+        if (joinedAsClubId !== targetEvent.clubId) {
+          setError("클럽 이벤트는 해당 클럽으로 참가해야 합니다.");
+          return;
+        }
+      }
+
       const participant = await joinEvent(targetEvent.id, {
         displayName,
         gender,
         guestNtrp,
+        joinedAsClubId: joinedAsClubId || null,
         userId: profile.id,
         inviteId: inviteId || null,
       });
@@ -227,6 +262,20 @@ export default function GuestPage() {
             ))}
           </select>
         </label>
+
+        {availableClubs.length > 0 ? (
+          <label className="grid gap-2 text-sm font-semibold">
+            참가 클럽
+            <select value={joinedAsClubId} onChange={(event) => setJoinedAsClubId(event.target.value)} className="poster-input">
+              <option value="">개인 참가</option>
+              {availableClubs.map((club) => (
+                <option key={club.id} value={club.id}>
+                  {club.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 

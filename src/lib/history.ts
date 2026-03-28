@@ -1,5 +1,6 @@
 "use client";
 
+import { getClubById } from "@/lib/clubs";
 import { loadAllEvents } from "@/lib/events";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { accumulateRoundStats, createStatsRecord, createEmptyStats } from "@/lib/stats";
@@ -69,7 +70,32 @@ function buildPlayers(event: EventRecord): Player[] {
   }));
 }
 
-export function buildFinalRanking(event: EventRecord): RankedPlayer[] {
+async function buildClubNameMap(event: EventRecord): Promise<Map<string, string>> {
+  const clubIds = new Set<string>();
+  if (event.clubId) {
+    clubIds.add(event.clubId);
+  }
+
+  for (const participant of event.participants) {
+    if (participant.joinedAsClubId) {
+      clubIds.add(participant.joinedAsClubId);
+    }
+  }
+
+  const map = new Map<string, string>();
+  await Promise.all(
+    Array.from(clubIds).map(async (clubId) => {
+      const club = await getClubById(clubId);
+      if (club?.clubName) {
+        map.set(clubId, club.clubName);
+      }
+    }),
+  );
+  return map;
+}
+
+export async function buildFinalRanking(event: EventRecord): Promise<RankedPlayer[]> {
+  const clubNameMap = await buildClubNameMap(event);
   const ranked = sortLeaderboard(buildPlayers(event), event.stats, "desc");
   return ranked.map((player, index) => {
     const participant = event.participants.find((item) => item.id === player.id);
@@ -79,6 +105,9 @@ export function buildFinalRanking(event: EventRecord): RankedPlayer[] {
       name: player.name,
       gender: participant?.gender ?? "unspecified",
       guestNtrp: participant?.guestNtrp ?? null,
+      joinedAsClubId: participant?.joinedAsClubId ?? null,
+      joinedAsClubName: participant?.joinedAsClubId ? clubNameMap.get(participant.joinedAsClubId) ?? null : null,
+      participantRole: participant?.role ?? "guest",
       rank: index + 1,
       stats: event.stats[player.id] ?? createEmptyStats(),
     };
@@ -93,8 +122,14 @@ function buildUserHistoryRecords(savedEvent: SavedEventRecord): UserEventHistory
       savedEventId: savedEvent.id,
       eventName: savedEvent.eventName,
       matchType: savedEvent.matchType,
+      eventType: savedEvent.eventType ?? "personal",
+      clubId: savedEvent.clubId ?? null,
+      clubName: savedEvent.clubName ?? null,
       userId: player.userId ?? "",
       participantId: player.participantId,
+      participantRole: player.participantRole ?? "guest",
+      joinedAsClubId: player.joinedAsClubId ?? null,
+      joinedAsClubName: player.joinedAsClubName ?? null,
       rank: player.rank,
       stats: player.stats,
       createdAt: savedEvent.savedAt,
@@ -151,6 +186,7 @@ function buildPairHistoryRecords(savedEvent: SavedEventRecord): PairHistoryRecor
 
 function buildMatchHistoryRecords(savedEvent: SavedEventRecord): MatchHistoryRecord[] {
   const records: MatchHistoryRecord[] = [];
+  const participantMap = new Map(savedEvent.snapshot.participants.map((participant) => [participant.id, participant]));
 
   for (const round of savedEvent.snapshot.rounds.filter((item) => item.completed)) {
     for (const match of round.matches) {
@@ -158,7 +194,7 @@ function buildMatchHistoryRecords(savedEvent: SavedEventRecord): MatchHistoryRec
       const scoreB = match.scoreB ?? 0;
 
       for (const player of [...match.teamA, ...match.teamB]) {
-        const participant = savedEvent.snapshot.participants.find((item) => item.id === player.id);
+        const participant = participantMap.get(player.id);
         if (!participant?.userId) {
           continue;
         }
@@ -180,6 +216,9 @@ function buildMatchHistoryRecords(savedEvent: SavedEventRecord): MatchHistoryRec
           eventName: savedEvent.eventName,
           userId: participant.userId,
           participantId: participant.id,
+          clubId: participant.joinedAsClubId ?? null,
+          clubName:
+            savedEvent.ranking.find((rankedPlayer) => rankedPlayer.participantId === participant.id)?.joinedAsClubName ?? null,
           roundNumber: round.roundNumber,
           courtNumber: match.court,
           result,
@@ -194,6 +233,115 @@ function buildMatchHistoryRecords(savedEvent: SavedEventRecord): MatchHistoryRec
   }
 
   return records;
+}
+
+async function rebuildDerivedStats(savedEvents: SavedEventRecord[]): Promise<void> {
+  if (!isSupabaseEnabled()) {
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return;
+  }
+
+  const totalMap = new Map<string, { userId: string; matchesPlayed: number; wins: number; losses: number; points: number }>();
+  const byClubMap = new Map<string, { userId: string; clubId: string; matchesPlayed: number; wins: number; losses: number; points: number }>();
+  const clubTotalsMap = new Map<string, { clubId: string; matchesPlayed: number; wins: number; losses: number; points: number }>();
+
+  for (const savedEvent of savedEvents) {
+    for (const player of savedEvent.ranking) {
+      if (!player.userId) {
+        continue;
+      }
+
+      const totalEntry = totalMap.get(player.userId) ?? {
+        userId: player.userId,
+        matchesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        points: 0,
+      };
+      totalEntry.matchesPlayed += player.stats.games;
+      totalEntry.wins += player.stats.wins;
+      totalEntry.losses += player.stats.losses;
+      totalEntry.points += player.stats.pointsScored;
+      totalMap.set(player.userId, totalEntry);
+
+      if (player.joinedAsClubId) {
+        const byClubKey = `${player.userId}:${player.joinedAsClubId}`;
+        const byClubEntry = byClubMap.get(byClubKey) ?? {
+          userId: player.userId,
+          clubId: player.joinedAsClubId,
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          points: 0,
+        };
+        byClubEntry.matchesPlayed += player.stats.games;
+        byClubEntry.wins += player.stats.wins;
+        byClubEntry.losses += player.stats.losses;
+        byClubEntry.points += player.stats.pointsScored;
+        byClubMap.set(byClubKey, byClubEntry);
+
+        const clubEntry = clubTotalsMap.get(player.joinedAsClubId) ?? {
+          clubId: player.joinedAsClubId,
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          points: 0,
+        };
+        clubEntry.matchesPlayed += player.stats.games;
+        clubEntry.wins += player.stats.wins;
+        clubEntry.losses += player.stats.losses;
+        clubEntry.points += player.stats.pointsScored;
+        clubTotalsMap.set(player.joinedAsClubId, clubEntry);
+      }
+    }
+  }
+
+  if (totalMap.size > 0) {
+    await supabase.from("player_stats_total").upsert(
+      Array.from(totalMap.values()).map((row) => ({
+        user_id: row.userId,
+        matches_played: row.matchesPlayed,
+        wins: row.wins,
+        losses: row.losses,
+        points: row.points,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "user_id" },
+    );
+  }
+
+  if (byClubMap.size > 0) {
+    await supabase.from("player_stats_by_club").upsert(
+      Array.from(byClubMap.values()).map((row) => ({
+        user_id: row.userId,
+        club_id: row.clubId,
+        matches_played: row.matchesPlayed,
+        wins: row.wins,
+        losses: row.losses,
+        points: row.points,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "user_id,club_id" },
+    );
+  }
+
+  if (clubTotalsMap.size > 0) {
+    await supabase.from("club_stats").upsert(
+      Array.from(clubTotalsMap.values()).map((row) => ({
+        club_id: row.clubId,
+        matches_played: row.matchesPlayed,
+        wins: row.wins,
+        losses: row.losses,
+        points: row.points,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "club_id" },
+    );
+  }
 }
 
 async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
@@ -256,6 +404,9 @@ async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
       event_name: savedEvent.eventName,
       host_user_id: savedEvent.hostUserId,
       match_type: savedEvent.matchType,
+      event_type: savedEvent.eventType ?? "personal",
+      club_id: savedEvent.clubId ?? null,
+      club_name: savedEvent.clubName ?? null,
       participant_count: savedEvent.participantCount,
       played_at: savedEvent.playedAt,
       saved_at: savedEvent.savedAt,
@@ -276,6 +427,9 @@ async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
       rank: player.rank,
       gender: player.gender,
       guest_ntrp: player.guestNtrp ?? null,
+      joined_as_club_id: player.joinedAsClubId ?? null,
+      joined_as_club_name: player.joinedAsClubName ?? null,
+      participant_role: player.participantRole ?? "guest",
       stats: player.stats,
     })),
     { onConflict: "id" },
@@ -287,8 +441,14 @@ async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
       saved_event_id: item.savedEventId,
       event_name: item.eventName,
       match_type: item.matchType,
+      event_type: item.eventType ?? "personal",
+      club_id: item.clubId ?? null,
+      club_name: item.clubName ?? null,
       user_id: item.userId,
       participant_id: item.participantId,
+      participant_role: item.participantRole ?? "guest",
+      joined_as_club_id: item.joinedAsClubId ?? null,
+      joined_as_club_name: item.joinedAsClubName ?? null,
       rank: item.rank,
       stats: item.stats,
       created_at: item.createdAt,
@@ -319,6 +479,8 @@ async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
         event_name: item.eventName,
         user_id: item.userId,
         participant_id: item.participantId,
+        club_id: item.clubId ?? null,
+        club_name: item.clubName ?? null,
         round_number: item.roundNumber,
         court_number: item.courtNumber,
         result: item.result,
@@ -331,10 +493,14 @@ async function persistSavedEvent(savedEvent: SavedEventRecord): Promise<void> {
       { onConflict: "id" },
     );
   }
+
+  const allSavedEvents = await loadSavedEvents();
+  await rebuildDerivedStats(allSavedEvents);
 }
 
 export async function saveCompletedEventRecord(event: EventRecord): Promise<SavedEventRecord> {
-  const ranking = buildFinalRanking(event);
+  const ranking = await buildFinalRanking(event);
+  const clubNameMap = await buildClubNameMap(event);
   const savedAt = new Date().toISOString();
   const savedEvent: SavedEventRecord = {
     id: `saved_${event.id}`,
@@ -342,6 +508,9 @@ export async function saveCompletedEventRecord(event: EventRecord): Promise<Save
     eventName: event.eventName,
     hostUserId: event.hostUserId,
     matchType: event.matchType,
+    eventType: event.eventType ?? "personal",
+    clubId: event.clubId ?? null,
+    clubName: event.clubId ? clubNameMap.get(event.clubId) ?? null : null,
     participantCount: event.participants.length,
     playedAt: event.updatedAt,
     savedAt,
@@ -368,7 +537,7 @@ export async function loadSavedEvents(): Promise<SavedEventRecord[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("saved_events")
-    .select("id, source_event_id, event_name, host_user_id, match_type, participant_count, played_at, saved_at, snapshot, ranking, top_three")
+    .select("id, source_event_id, event_name, host_user_id, match_type, event_type, club_id, club_name, participant_count, played_at, saved_at, snapshot, ranking, top_three")
     .order("saved_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
@@ -381,6 +550,9 @@ export async function loadSavedEvents(): Promise<SavedEventRecord[]> {
     eventName: row.event_name,
     hostUserId: row.host_user_id,
     matchType: row.match_type,
+    eventType: row.event_type ?? "personal",
+    clubId: row.club_id ?? null,
+    clubName: row.club_name ?? null,
     participantCount: row.participant_count,
     playedAt: row.played_at,
     savedAt: row.saved_at,
@@ -459,7 +631,7 @@ export async function loadUserEventHistory(userId: string): Promise<UserEventHis
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_event_history")
-    .select("id, saved_event_id, event_name, match_type, user_id, participant_id, rank, stats, created_at")
+    .select("id, saved_event_id, event_name, match_type, event_type, club_id, club_name, user_id, participant_id, participant_role, joined_as_club_id, joined_as_club_name, rank, stats, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -472,8 +644,14 @@ export async function loadUserEventHistory(userId: string): Promise<UserEventHis
     savedEventId: row.saved_event_id,
     eventName: row.event_name,
     matchType: row.match_type,
+    eventType: row.event_type ?? "personal",
+    clubId: row.club_id ?? null,
+    clubName: row.club_name ?? null,
     userId: row.user_id,
     participantId: row.participant_id,
+    participantRole: row.participant_role ?? "guest",
+    joinedAsClubId: row.joined_as_club_id ?? null,
+    joinedAsClubName: row.joined_as_club_name ?? null,
     rank: row.rank,
     stats: row.stats as PlayerStats,
     createdAt: row.created_at,
@@ -517,7 +695,7 @@ export async function loadMatchHistory(userId: string): Promise<MatchHistoryReco
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("match_history")
-    .select("id, saved_event_id, event_name, user_id, participant_id, round_number, court_number, result, score_for, score_against, teammates, opponents, created_at")
+    .select("id, saved_event_id, event_name, user_id, participant_id, club_id, club_name, round_number, court_number, result, score_for, score_against, teammates, opponents, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -531,6 +709,8 @@ export async function loadMatchHistory(userId: string): Promise<MatchHistoryReco
     eventName: row.event_name,
     userId: row.user_id,
     participantId: row.participant_id,
+    clubId: row.club_id ?? null,
+    clubName: row.club_name ?? null,
     roundNumber: row.round_number,
     courtNumber: row.court_number,
     result: row.result,
@@ -550,15 +730,21 @@ export async function buildAdminUserSummaries(): Promise<AdminUserSummary[]> {
           const supabase = getSupabaseClient();
           const { data } = await supabase!
             .from("user_event_history")
-            .select("id, saved_event_id, event_name, match_type, user_id, participant_id, rank, stats, created_at");
+            .select("id, saved_event_id, event_name, match_type, event_type, club_id, club_name, user_id, participant_id, participant_role, joined_as_club_id, joined_as_club_name, rank, stats, created_at");
           return Array.isArray(data)
             ? (data.map((row) => ({
                 id: row.id,
                 savedEventId: row.saved_event_id,
                 eventName: row.event_name,
                 matchType: row.match_type,
+                eventType: row.event_type ?? "personal",
+                clubId: row.club_id ?? null,
+                clubName: row.club_name ?? null,
                 userId: row.user_id,
                 participantId: row.participant_id,
+                participantRole: row.participant_role ?? "guest",
+                joinedAsClubId: row.joined_as_club_id ?? null,
+                joinedAsClubName: row.joined_as_club_name ?? null,
                 rank: row.rank,
                 stats: row.stats as PlayerStats,
                 createdAt: row.created_at,

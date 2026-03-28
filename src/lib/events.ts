@@ -31,8 +31,13 @@ type EventRow = {
   id: string;
   code: string | null;
   event_name: string;
+  title?: string | null;
   host_user_id: string;
   match_type: EventRecord["matchType"];
+  event_type?: EventRecord["eventType"] | null;
+  club_id?: string | null;
+  participation_code?: string | null;
+  max_players?: number | null;
   court_count: number;
   round_count: number;
   round_view_mode: RoundViewMode;
@@ -55,7 +60,9 @@ function normalizeParticipants(participants: EventRecord["participants"] | null 
     eventId: participant?.eventId ?? "",
     displayName: participant?.displayName ?? "",
     gender: participant?.gender ?? "unspecified",
+    joinedAsClubId: participant?.joinedAsClubId ?? null,
     guestNtrp: typeof participant?.guestNtrp === "number" ? participant.guestNtrp : null,
+    ntrpAtEvent: typeof participant?.ntrpAtEvent === "number" ? participant.ntrpAtEvent : (typeof participant?.guestNtrp === "number" ? participant.guestNtrp : null),
     hostSkillOverride: participant?.hostSkillOverride ?? null,
     skillLevel: resolveParticipantSkill({
       guestNtrp: typeof participant?.guestNtrp === "number" ? participant.guestNtrp : null,
@@ -196,9 +203,13 @@ function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "i
   return {
     id: event.id,
     code: event.code ?? "",
+    participationCode: event.participationCode ?? event.code ?? "",
     eventName: event.eventName ?? "",
     hostUserId: event.hostUserId ?? "",
     matchType: event.matchType ?? "singles",
+    eventType: event.eventType ?? "personal",
+    clubId: event.clubId ?? null,
+    maxPlayers: typeof event.maxPlayers === "number" ? event.maxPlayers : null,
     courtCount: typeof event.courtCount === "number" ? event.courtCount : 1,
     roundCount: typeof event.roundCount === "number" ? event.roundCount : 1,
     roundViewMode: event.roundViewMode ?? "progressive",
@@ -211,6 +222,8 @@ function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "i
     auditLogs,
     createdAt: event.createdAt ?? new Date().toISOString(),
     updatedAt: event.updatedAt ?? new Date().toISOString(),
+    startedAt: event.startedAt ?? null,
+    finishedAt: event.finishedAt ?? null,
     isSaved: Boolean(event.isSaved),
     savedAt: event.savedAt ?? null,
     savedByUserId: event.savedByUserId ?? null,
@@ -263,6 +276,10 @@ function hydrateEvent(row: EventRow): EventRecord {
         eventName: state.eventName ?? row.event_name,
         hostUserId: state.hostUserId ?? row.host_user_id,
         matchType: state.matchType ?? row.match_type,
+        eventType: state.eventType ?? row.event_type ?? "personal",
+        clubId: state.clubId ?? row.club_id ?? null,
+        participationCode: state.participationCode ?? row.participation_code ?? row.code ?? "",
+        maxPlayers: state.maxPlayers ?? row.max_players ?? null,
         courtCount: state.courtCount ?? row.court_count,
         roundCount: state.roundCount ?? row.round_count,
         roundViewMode: state.roundViewMode ?? row.round_view_mode,
@@ -272,6 +289,8 @@ function hydrateEvent(row: EventRow): EventRecord {
         savedByUserId: state.savedByUserId ?? row.saved_by_user_id ?? null,
         createdAt: state.createdAt ?? row.created_at ?? new Date().toISOString(),
         updatedAt: state.updatedAt ?? row.updated_at ?? new Date().toISOString(),
+        startedAt: state.startedAt ?? null,
+        finishedAt: state.finishedAt ?? null,
       });
       cacheEvent(hydrated);
       return hydrated;
@@ -283,6 +302,10 @@ function hydrateEvent(row: EventRow): EventRecord {
       eventName: row.event_name,
       hostUserId: row.host_user_id,
       matchType: row.match_type,
+      eventType: row.event_type ?? "personal",
+      clubId: row.club_id ?? null,
+      participationCode: row.participation_code ?? row.code ?? "",
+      maxPlayers: row.max_players ?? null,
       courtCount: row.court_count,
       roundCount: row.round_count,
       roundViewMode: row.round_view_mode,
@@ -296,6 +319,8 @@ function hydrateEvent(row: EventRow): EventRecord {
       savedByUserId: row.saved_by_user_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
     });
     cacheEvent(fallback);
     return fallback;
@@ -307,6 +332,10 @@ function hydrateEvent(row: EventRow): EventRecord {
       eventName: row.event_name,
       hostUserId: row.host_user_id,
       matchType: row.match_type,
+      eventType: row.event_type ?? "personal",
+      clubId: row.club_id ?? null,
+      participationCode: row.participation_code ?? row.code ?? "",
+      maxPlayers: row.max_players ?? null,
       courtCount: row.court_count,
       roundCount: row.round_count,
       roundViewMode: row.round_view_mode,
@@ -320,6 +349,8 @@ function hydrateEvent(row: EventRow): EventRecord {
       savedByUserId: row.saved_by_user_id ?? null,
       createdAt: row.created_at ?? new Date().toISOString(),
       updatedAt: row.updated_at ?? new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
     });
   }
 }
@@ -341,8 +372,13 @@ async function persistEvent(event: EventRecord): Promise<void> {
       id: event.id,
       code: event.code,
       event_name: event.eventName,
+      title: event.eventName,
       host_user_id: event.hostUserId,
       match_type: event.matchType,
+      event_type: event.eventType ?? "personal",
+      club_id: event.clubId ?? null,
+      participation_code: event.participationCode ?? event.code,
+      max_players: event.maxPlayers ?? null,
       court_count: event.courtCount,
       round_count: event.roundCount,
       round_view_mode: event.roundViewMode,
@@ -375,7 +411,7 @@ async function loadEventsFromSource(): Promise<EventRecord[]> {
 
     const { data, error } = await supabase
       .from("events")
-      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
+      .select("id, code, event_name, title, host_user_id, match_type, event_type, club_id, participation_code, max_players, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
       .order("created_at", { ascending: false });
 
     if (error || !data) {
@@ -699,6 +735,8 @@ export async function loadUserInvitations(userId: string): Promise<Invitation[]>
 export async function createEvent(input: {
   eventName: string;
   matchType: "singles" | "doubles";
+  eventType?: EventRecord["eventType"];
+  clubId?: string | null;
   courtCount: number;
   roundCount: number;
   roundViewMode: RoundViewMode;
@@ -707,12 +745,14 @@ export async function createEvent(input: {
 }): Promise<{ event: EventRecord; hostParticipant: Participant }> {
   const sessionId = input.hostUserId ?? getSessionId("host");
   const eventId = makeId("event");
+  const participationCode = makeEventCode();
   const hostParticipant = createParticipant({
     eventId,
     displayName: input.hostName.trim(),
     role: "host",
     sessionId,
     userId: input.hostUserId ?? sessionId,
+    joinedAsClubId: input.eventType === "club" ? input.clubId ?? null : null,
     gender: "unspecified",
     guestNtrp: null,
     hostSkillOverride: "medium",
@@ -721,10 +761,14 @@ export async function createEvent(input: {
 
   const event: EventRecord = {
     id: eventId,
-    code: makeEventCode(),
+    code: participationCode,
+    participationCode,
     eventName: input.eventName.trim(),
     hostUserId: sessionId,
     matchType: input.matchType,
+    eventType: input.eventType ?? "personal",
+    clubId: input.eventType === "club" ? input.clubId ?? null : null,
+    maxPlayers: null,
     courtCount: input.courtCount,
     roundCount: input.roundCount,
     roundViewMode: input.roundViewMode,
@@ -737,6 +781,8 @@ export async function createEvent(input: {
     auditLogs: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
     isSaved: false,
     savedAt: null,
     savedByUserId: null,
@@ -764,7 +810,7 @@ export async function loadEvent(eventId: string): Promise<EventRecord | null> {
 
     const { data, error } = await supabase
       .from("events")
-      .select("id, code, event_name, host_user_id, match_type, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
+      .select("id, code, event_name, title, host_user_id, match_type, event_type, club_id, participation_code, max_players, court_count, round_count, round_view_mode, status, state, is_saved, saved_at, saved_by_user_id, created_at, updated_at")
       .eq("id", eventId)
       .maybeSingle();
 
@@ -807,6 +853,7 @@ export async function joinEvent(
     gender: ParticipantGender;
     guestNtrp?: number | null;
     userId?: string | null;
+    joinedAsClubId?: string | null;
     inviteId?: string | null;
   },
 ): Promise<Participant | null> {
@@ -849,9 +896,11 @@ export async function joinEvent(
     eventId,
     sessionId,
     userId: input.userId ?? null,
+    joinedAsClubId: input.joinedAsClubId ?? null,
     displayName: normalizedName,
     gender: input.gender,
     guestNtrp: input.guestNtrp ?? null,
+    ntrpAtEvent: input.guestNtrp ?? null,
     hostSkillOverride: null,
     role: "guest",
     source: "joined",

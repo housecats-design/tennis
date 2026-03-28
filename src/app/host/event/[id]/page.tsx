@@ -2,6 +2,7 @@
 
 import { QRCodeSVG } from "qrcode.react";
 import { getCurrentProfile } from "@/lib/auth";
+import { getClubById } from "@/lib/clubs";
 import {
   addFutureRound,
   canEditParticipants,
@@ -27,7 +28,7 @@ import { buildFinalRanking, loadRecommendedPlayersForHost, saveCompletedEventRec
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
 import { listProfiles } from "@/lib/users";
-import { Participant, PlayerStats, SkillLevel, UserProfile } from "@/lib/types";
+import { Participant, PlayerStats, RankedPlayer, SkillLevel, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -70,6 +71,8 @@ export default function HostEventPage() {
   const [roundActionPending, setRoundActionPending] = useState<string | null>(null);
   const [recommendedMembers, setRecommendedMembers] = useState<Array<{ userId: string; displayName: string; email?: string | null }>>([]);
   const [matchEditDrafts, setMatchEditDrafts] = useState<Record<string, string[]>>({});
+  const [eventClubName, setEventClubName] = useState<string | null>(null);
+  const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
 
   useEffect(() => {
     if (!eventId) {
@@ -176,7 +179,6 @@ export default function HostEventPage() {
     const availableUserIds = new Set(availableMembers.map((member) => member.id));
     return recommendedMembers.filter((member) => availableUserIds.has(member.userId) && !invitedUserIds.has(member.userId));
   }, [availableMembers, event?.invitations, recommendedMembers]);
-  const finalRanking = useMemo(() => (event?.status === "completed" || event?.status === "finished" ? buildFinalRanking(event) : []), [event]);
   const hostParticipantId = useMemo(
     () => event?.participants.find((participant) => participant.role === "host")?.id ?? null,
     [event],
@@ -194,6 +196,24 @@ export default function HostEventPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!event?.clubId) {
+      setEventClubName(null);
+      return;
+    }
+
+    void getClubById(event.clubId).then((club) => setEventClubName(club?.clubName ?? null));
+  }, [event?.clubId]);
+
+  useEffect(() => {
+    if (!event || (event.status !== "completed" && event.status !== "finished")) {
+      setFinalRanking([]);
+      return;
+    }
+
+    void buildFinalRanking(event).then(setFinalRanking);
+  }, [event]);
 
   async function handleParticipantChange(
     participantId: string,
@@ -639,6 +659,10 @@ export default function HostEventPage() {
           <p className="mt-4 text-sm text-ink/68">
             {event.matchType === "singles" ? "단식" : "복식"} / 코트 {event.courtCount}개 / 라운드 {event.roundCount}개 / 보기 모드 {event.roundViewMode}
           </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold tracking-[0.16em] text-ink/55 uppercase">
+            <span>{event.eventType === "club" ? "CLUB EVENT" : "PERSONAL EVENT"}</span>
+            {eventClubName ? <span>· {eventClubName}</span> : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-3">

@@ -1,10 +1,11 @@
 "use client";
 
+import { getClubById } from "@/lib/clubs";
 import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent } from "@/lib/events";
 import { buildFinalRanking } from "@/lib/history";
 import { getCurrentProfile } from "@/lib/auth";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
-import { Notification } from "@/lib/types";
+import { Notification, RankedPlayer } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -104,6 +105,9 @@ export default function GuestEventPage() {
   const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
   const [pendingCustomScore, setPendingCustomScore] = useState<{ scoreA: number; scoreB: number } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [eventClubName, setEventClubName] = useState<string | null>(null);
+  const [participantClubName, setParticipantClubName] = useState<string | null>(null);
+  const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -197,7 +201,6 @@ export default function GuestEventPage() {
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
   const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
-  const finalRanking = useMemo(() => (currentEvent?.status === "completed" || currentEvent?.status === "finished" ? buildFinalRanking(currentEvent) : []), [currentEvent]);
   const hasAcceptedProposal = Boolean(
     participantId && currentMatch?.scoreProposal?.acceptedByParticipantIds.includes(participantId),
   );
@@ -221,6 +224,34 @@ export default function GuestEventPage() {
       }
     }
   }, [assignment.body, assignment.title, notifications, participantId]);
+
+  useEffect(() => {
+    if (!currentEvent?.clubId) {
+      setEventClubName(null);
+      return;
+    }
+
+    void getClubById(currentEvent.clubId).then((club) => setEventClubName(club?.clubName ?? null));
+  }, [currentEvent?.clubId]);
+
+  useEffect(() => {
+    const joinedAsClubId = currentEvent?.participants.find((participant) => participant.id === participantId)?.joinedAsClubId;
+    if (!joinedAsClubId) {
+      setParticipantClubName(null);
+      return;
+    }
+
+    void getClubById(joinedAsClubId).then((club) => setParticipantClubName(club?.clubName ?? null));
+  }, [currentEvent?.participants, participantId]);
+
+  useEffect(() => {
+    if (!currentEvent || (currentEvent.status !== "completed" && currentEvent.status !== "finished")) {
+      setFinalRanking([]);
+      return;
+    }
+
+    void buildFinalRanking(currentEvent).then(setFinalRanking);
+  }, [currentEvent]);
 
   async function submitProposalScores(scoreA: number, scoreB: number): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
@@ -352,6 +383,11 @@ export default function GuestEventPage() {
             Round {currentRound.roundNumber} / Court {currentMatch.court}
           </div>
         ) : null}
+        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold tracking-[0.16em] text-ink/55 uppercase">
+          <span>{currentEvent?.eventType === "club" ? "CLUB EVENT" : "PERSONAL EVENT"}</span>
+          {eventClubName ? <span>· {eventClubName}</span> : null}
+          {participantClubName ? <span>· 참가 클럽 {participantClubName}</span> : null}
+        </div>
         {participantMeta && currentEvent && participantId ? (
           <div className="mt-5 grid gap-2 border-t border-line pt-4 text-sm text-ink/75 sm:grid-cols-3">
             <div>이름: {participantMeta.name}</div>

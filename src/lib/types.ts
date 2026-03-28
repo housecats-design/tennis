@@ -8,13 +8,23 @@ export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
 export type AppRole = "host" | "player";
 export type AuthMode = "login" | "signup";
 export type UserRole = "member" | "admin";
-export type ClubRole = "owner" | "manager" | "member";
+export type ClubRole = "leader" | "vice_leader" | "member";
 export type ParticipantSource = "host" | "joined" | "member" | "manual";
 export type RoundCloseReason = "completed" | "force_closed" | "skipped";
 export type RoundState = "waiting" | "assigned" | "playing" | "score_pending" | "disputed" | "completed";
 export type ParticipantAvailabilityState = "active" | "unavailable" | "injured" | "left_early";
 export type InvitationState = "pending" | "accepted" | "declined" | "expired";
 export type NotificationType = "info" | "success" | "warning" | "invitation" | "dispute" | "approval" | "system";
+export type EventType = "personal" | "club";
+export type ClubStatus = "pending" | "approved" | "rejected" | "active" | "inactive" | "archived";
+export type ClubApplicationStatus = "pending" | "approved" | "rejected";
+export type ClubMembershipStatus = "pending" | "approved" | "rejected" | "left" | "banned";
+export type ClubJoinRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+export type EventParticipantStatus = "active" | "unavailable" | "injured" | "left_early" | "removed";
+export type MatchStatus = "waiting" | "assigned" | "playing" | "score_pending" | "disputed" | "completed";
+export type MatchApprovalStatus = "pending" | "approved" | "rejected";
+export type MatchObjectionStatus = "pending" | "resolved" | "dismissed";
+export type InteractionType = "same_match" | "same_team" | "opponent" | "same_event";
 
 export type Player = {
   id: string;
@@ -110,9 +120,11 @@ export type Participant = {
   eventId: string;
   userId?: string | null;
   sessionId?: string | null;
+  joinedAsClubId?: string | null;
   displayName: string;
   gender: ParticipantGender;
   guestNtrp?: number | null;
+  ntrpAtEvent?: number | null;
   hostSkillOverride?: SkillLevel | null;
   skillLevel: SkillLevel;
   role: ParticipantRole;
@@ -120,6 +132,8 @@ export type Participant = {
   joinedAt?: string;
   isActive?: boolean;
   availabilityState?: ParticipantAvailabilityState;
+  status?: EventParticipantStatus;
+  leftAt?: string | null;
 };
 
 export type Notification = {
@@ -169,9 +183,13 @@ export type AuditLog = {
 export type EventRecord = {
   id: string;
   code: string;
+  participationCode?: string;
   eventName: string;
   hostUserId: string;
   matchType: MatchType;
+  eventType?: EventType;
+  clubId?: string | null;
+  maxPlayers?: number | null;
   courtCount: number;
   roundCount: number;
   roundViewMode: RoundViewMode;
@@ -184,6 +202,8 @@ export type EventRecord = {
   auditLogs?: AuditLog[];
   createdAt: string;
   updatedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
   isSaved?: boolean;
   savedAt?: string | null;
   savedByUserId?: string | null;
@@ -212,7 +232,9 @@ export type UserProfile = {
   displayName: string;
   gender: ParticipantGender;
   genderLockedAt?: string | null;
+  ntrp?: number | null;
   defaultNtrp?: number | null;
+  roleLastSelected?: AppRole | null;
   isAdmin: boolean;
   memo: string;
   isDeleted: boolean;
@@ -227,6 +249,9 @@ export type RankedPlayer = {
   name: string;
   gender: ParticipantGender;
   guestNtrp?: number | null;
+  joinedAsClubId?: string | null;
+  joinedAsClubName?: string | null;
+  participantRole?: ParticipantRole;
   rank: number;
   stats: PlayerStats;
 };
@@ -237,6 +262,9 @@ export type SavedEventSummary = {
   eventName: string;
   hostUserId: string;
   matchType: MatchType;
+  eventType?: EventType;
+  clubId?: string | null;
+  clubName?: string | null;
   participantCount: number;
   playedAt: string;
   savedAt: string;
@@ -253,8 +281,14 @@ export type UserEventHistory = {
   savedEventId: string;
   eventName: string;
   matchType: MatchType;
+  eventType?: EventType;
+  clubId?: string | null;
+  clubName?: string | null;
   userId: string;
   participantId: string;
+  participantRole?: ParticipantRole;
+  joinedAsClubId?: string | null;
+  joinedAsClubName?: string | null;
   rank: number;
   stats: PlayerStats;
   createdAt: string;
@@ -276,6 +310,8 @@ export type MatchHistoryRecord = {
   eventName: string;
   userId: string;
   participantId: string;
+  clubId?: string | null;
+  clubName?: string | null;
   roundNumber: number;
   courtNumber: number;
   result: "win" | "loss" | "skipped";
@@ -300,8 +336,12 @@ export type AdminUserSummary = {
 export type Club = {
   id: string;
   clubName: string;
+  region?: string | null;
   description?: string | null;
   createdByUserId: string;
+  status?: ClubStatus;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   isActive?: boolean;
@@ -313,7 +353,129 @@ export type ClubMember = {
   clubId: string;
   userId: string;
   role: ClubRole;
+  membershipStatus?: ClubMembershipStatus;
   joinedAt: string;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  leftAt?: string | null;
   isActive?: boolean;
   deletedAt?: string | null;
+};
+
+export type ClubApplication = {
+  id: string;
+  applicantUserId: string;
+  clubName: string;
+  region: string;
+  description?: string | null;
+  status: ClubApplicationStatus;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+};
+
+export type ClubJoinRequest = {
+  id: string;
+  clubId: string;
+  userId: string;
+  status: ClubJoinRequestStatus;
+  message?: string | null;
+  requestedAt: string;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+};
+
+export type PlayerStatsTotal = {
+  userId: string;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  points: number;
+  updatedAt: string;
+};
+
+export type PlayerStatsByClub = {
+  userId: string;
+  clubId: string;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  points: number;
+  updatedAt: string;
+};
+
+export type ClubStats = {
+  clubId: string;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  points: number;
+  updatedAt: string;
+};
+
+export type PlayerRating = {
+  userId: string;
+  ratingPoints: number;
+  confidenceScore: number;
+  ntrpSeed?: number | null;
+  updatedAt: string;
+};
+
+export type PointTransaction = {
+  id: string;
+  eventId?: string | null;
+  matchId?: string | null;
+  userId: string;
+  clubId?: string | null;
+  basePoints: number;
+  ntrpBonus: number;
+  upsetBonus: number;
+  closeGameBonus: number;
+  totalPoints: number;
+  memo?: string | null;
+  createdAt: string;
+};
+
+export type PlayerInteraction = {
+  id: string;
+  eventId: string;
+  matchId?: string | null;
+  userId: string;
+  otherUserId: string;
+  interactionType: InteractionType;
+  createdAt: string;
+};
+
+export type EventInviteRecord = {
+  id: string;
+  eventId: string;
+  invitedUserId: string;
+  invitedByUserId: string;
+  status: InvitationState;
+  inviteLinkToken: string;
+  createdAt: string;
+  respondedAt?: string | null;
+  expiresAt?: string | null;
+};
+
+export type MatchScoreApproval = {
+  id: string;
+  matchId: string;
+  eventParticipantId: string;
+  approvalStatus: MatchApprovalStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MatchObjection = {
+  id: string;
+  matchId: string;
+  eventParticipantId: string;
+  reason?: string | null;
+  status: MatchObjectionStatus;
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

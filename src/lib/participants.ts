@@ -32,6 +32,8 @@ export function createParticipant(input: {
   displayName: string;
   gender: Participant["gender"];
   guestNtrp?: number | null;
+  joinedAsClubId?: string | null;
+  ntrpAtEvent?: number | null;
   hostSkillOverride?: Participant["skillLevel"] | null;
   role: "host" | "guest";
   sessionId?: string;
@@ -43,7 +45,9 @@ export function createParticipant(input: {
     eventId: input.eventId,
     displayName: input.displayName.trim(),
     gender: input.gender,
+    joinedAsClubId: input.joinedAsClubId ?? null,
     guestNtrp: input.guestNtrp ?? null,
+    ntrpAtEvent: typeof input.ntrpAtEvent === "number" ? input.ntrpAtEvent : input.guestNtrp ?? null,
     hostSkillOverride: input.hostSkillOverride ?? null,
     skillLevel: resolveParticipantSkill({
       guestNtrp: input.guestNtrp,

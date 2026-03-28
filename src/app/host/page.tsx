@@ -1,9 +1,10 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
+import { canCreateClubEvent, getClubById, listMyClubMemberships } from "@/lib/clubs";
 import { createEvent } from "@/lib/events";
 import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
-import { RoundViewMode, UserProfile } from "@/lib/types";
+import { EventType, RoundViewMode, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -17,18 +18,34 @@ export default function HostPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [eventName, setEventName] = useState("");
   const [hostName, setHostName] = useState("");
+  const [eventType, setEventType] = useState<EventType>("personal");
+  const [clubId, setClubId] = useState("");
   const [matchType, setMatchType] = useState<"singles" | "doubles">("doubles");
   const [courtCount, setCourtCount] = useState(2);
   const [roundCount, setRoundCount] = useState(4);
   const [roundViewMode, setRoundViewMode] = useState<RoundViewMode>("full");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [availableClubs, setAvailableClubs] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     const sync = async () => {
       const nextProfile = await getCurrentProfile();
       setProfile(nextProfile);
       setHostName(nextProfile?.displayName ?? "");
+      if (nextProfile?.id) {
+        const memberships = await listMyClubMemberships(nextProfile.id);
+        const operatorMemberships = memberships.filter(
+          (membership) => membership.membershipStatus === "approved" && canCreateClubEvent(membership.role),
+        );
+        const clubs = await Promise.all(
+          operatorMemberships.map(async (membership) => {
+            const club = await getClubById(membership.clubId);
+            return club ? { id: club.id, name: club.clubName } : null;
+          }),
+        );
+        setAvailableClubs(clubs.filter(Boolean) as Array<{ id: string; name: string }>);
+      }
       setCheckingAuth(false);
     };
 
@@ -49,12 +66,19 @@ export default function HostPage() {
       return;
     }
 
+    if (eventType === "club" && !clubId) {
+      setError("클럽 이벤트는 클럽을 선택해야 합니다.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       console.info("[host-create] creating event", {
         eventName: eventName.trim(),
         hostUserId: profile.id,
+        eventType,
+        clubId: eventType === "club" ? clubId : null,
         matchType,
         courtCount,
         roundCount,
@@ -65,6 +89,8 @@ export default function HostPage() {
         eventName,
         hostName,
         matchType,
+        eventType,
+        clubId: eventType === "club" ? clubId : null,
         courtCount,
         roundCount,
         roundViewMode,
@@ -146,6 +172,24 @@ export default function HostPage() {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="grid gap-2 text-sm font-semibold">
+            이벤트 유형
+            <select
+              value={eventType}
+              onChange={(event) => {
+                const nextType = event.target.value as EventType;
+                setEventType(nextType);
+                if (nextType === "personal") {
+                  setClubId("");
+                }
+              }}
+              className="poster-input"
+            >
+              <option value="personal">개인 이벤트</option>
+              <option value="club">클럽 이벤트</option>
+            </select>
+          </label>
+
+          <label className="grid gap-2 text-sm font-semibold">
             경기 유형
             <select
               value={matchType}
@@ -183,6 +227,21 @@ export default function HostPage() {
             </select>
           </label>
         </div>
+
+        {eventType === "club" ? (
+          <label className="grid gap-2 text-sm font-semibold sm:max-w-md">
+            클럽 선택
+            <select value={clubId} onChange={(event) => setClubId(event.target.value)} className="poster-input">
+              <option value="">운영할 클럽 선택</option>
+              {availableClubs.map((club) => (
+                <option key={club.id} value={club.id}>
+                  {club.name}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-ink/55">리더 또는 부리더 권한이 있는 클럽만 선택할 수 있습니다.</span>
+          </label>
+        ) : null}
 
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 

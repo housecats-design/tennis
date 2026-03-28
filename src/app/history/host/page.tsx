@@ -55,6 +55,9 @@ export default function HostHistoryPage() {
                 <div className="mt-2 text-sm text-ink/65">
                   {new Date(event.savedAt).toLocaleString("ko-KR")} · {event.matchType === "singles" ? "단식" : "복식"} · 참가 {event.participantCount}명
                 </div>
+                <div className="mt-2 text-sm text-ink/60">
+                  {event.eventType === "club" ? `클럽 이벤트${event.clubName ? ` · ${event.clubName}` : ""}` : "개인 이벤트"}
+                </div>
                 <div className="mt-2 text-sm text-ink/68">
                   TOP 3: {event.topThree.map((item) => `${item.rank}등 ${item.name}`).join(" / ")}
                 </div>
