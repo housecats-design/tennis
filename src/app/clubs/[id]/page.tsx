@@ -183,16 +183,25 @@ export default function ClubDetailPage() {
     <main className="poster-page max-w-5xl">
       <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
-        <Link href="/clubs" className="poster-button-secondary">클럽 목록</Link>
+        <Link href="/clubs/home" className="poster-button-secondary">내 클럽 홈</Link>
+        <Link href="/clubs" className="poster-button-secondary">클럽 탐색</Link>
       </div>
 
       <section className="border-t border-line py-8">
-        <p className="poster-label">Club Detail</p>
+        <p className="poster-label">클럽 상세</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">{club.clubName}</h1>
         <p className="mt-4 text-sm text-ink/68">
           {club.region ? `${club.region} · ` : ""}{club.description ?? "클럽 소개가 아직 없습니다."}
         </p>
         <div className="mt-4 text-xs text-ink/55">상태: {club.status === "approved" ? "승인됨" : club.status === "active" ? "운영중" : club.status}</div>
+        <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink/55">
+          <span>홈</span>
+          <span>· 멤버</span>
+          <span>· 랭킹</span>
+          <span>· 이벤트</span>
+          <span>· 활동</span>
+          <span>· 관리</span>
+        </div>
       </section>
 
       <section className="border-t border-line py-8">
@@ -251,7 +260,8 @@ export default function ClubDetailPage() {
 
       {canApproveRequests ? (
         <section className="border-t border-line py-8">
-          <h2 className="text-2xl font-black">가입 요청 관리</h2>
+          <h2 className="text-2xl font-black">클럽 관리</h2>
+          <div className="mt-2 text-sm text-ink/65">클럽장은 가입 요청 승인/거절과 부클럽장 지정을 이 화면에서 직접 처리할 수 있습니다.</div>
           <div className="mt-4 space-y-3">
             {pendingRequests.length > 0 ? (
               pendingRequests.map((request) => (

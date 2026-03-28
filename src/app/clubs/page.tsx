@@ -9,9 +9,11 @@ import {
 } from "@/lib/clubs";
 import { Club, ClubApplication, ClubMember, UserProfile } from "@/lib/types";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 export default function ClubsPage() {
+  const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [memberships, setMemberships] = useState<ClubMember[]>([]);
@@ -38,6 +40,13 @@ export default function ClubsPage() {
           ]);
           setMemberships(nextMemberships);
           setApplications(nextApplications);
+          const hasApprovedClub = nextMemberships.some(
+            (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
+          );
+          if (hasApprovedClub) {
+            router.replace("/clubs/home");
+            return;
+          }
         }
       } finally {
         setLoading(false);
@@ -45,7 +54,7 @@ export default function ClubsPage() {
     };
 
     void load();
-  }, []);
+  }, [router]);
 
   async function handleSubmitApplication(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -93,13 +102,14 @@ export default function ClubsPage() {
       <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         {profile ? <Link href="/profile" className="poster-button-secondary">프로필 설정</Link> : null}
+        <Link href="/clubs" className="poster-button-secondary">클럽 탐색</Link>
       </div>
 
       <section className="border-t border-line py-8">
-        <p className="poster-label">Club</p>
-        <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">클럽</h1>
+        <p className="poster-label">클럽 탐색</p>
+        <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">클럽 탐색</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink/68">
-          클럽을 둘러보고 가입 신청을 보낼 수 있습니다. 클럽 생성은 즉시 생성이 아니라 요청 후 관리자 승인 방식입니다.
+          클럽 소개를 보고, 가입 신청을 보내고, 클럽 생성 요청과 내 요청 이력을 확인할 수 있습니다.
         </p>
       </section>
 

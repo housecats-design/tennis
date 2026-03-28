@@ -95,6 +95,15 @@ export function loadLastParticipant(): string | null {
   return window.localStorage.getItem(LAST_PARTICIPANT_STORAGE_KEY);
 }
 
+export function clearLastParticipation(): void {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(LAST_EVENT_STORAGE_KEY);
+  window.localStorage.removeItem(LAST_PARTICIPANT_STORAGE_KEY);
+}
+
 export function createEventBroadcastChannel(eventId: string): BroadcastChannel | null {
   if (!canUseStorage() || typeof BroadcastChannel === "undefined") {
     return null;

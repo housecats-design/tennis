@@ -11,8 +11,9 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { joinEvent, loadEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { getReturnableParticipant, joinEvent, loadEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
 import {
+  clearLastParticipation,
   clearPostLoginRedirect,
   loadLastEvent,
   loadLastParticipant,
@@ -88,15 +89,15 @@ export default function HomePage() {
         const lastEventId = loadLastEvent();
         const lastParticipantId = loadLastParticipant();
         const lastEvent = lastEventId ? await loadEvent(lastEventId) : null;
-        setResumeEventId(
-          lastEvent &&
-            lastParticipantId &&
-            lastEvent.status !== "finished" &&
-            lastEvent.status !== "completed" &&
-            lastEvent.participants.some((participant) => participant.id === lastParticipantId || participant.userId === nextProfile.id)
-            ? lastEvent.id
-            : null,
-        );
+        const returnableParticipant = getReturnableParticipant(lastEvent, {
+          userId: nextProfile.id,
+          participantId: lastParticipantId,
+        });
+        const canResume = Boolean(returnableParticipant && returnableParticipant.role !== "host");
+        if (!canResume) {
+          clearLastParticipation();
+        }
+        setResumeEventId(canResume && lastEvent ? lastEvent.id : null);
       } else {
         setInvitations([]);
         setResumeEventId(null);

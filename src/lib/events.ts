@@ -1901,6 +1901,43 @@ export function getCurrentRound(event: EventRecord): Round | null {
     : null;
 }
 
+export function getReturnableParticipant(
+  event: EventRecord | null,
+  input: { userId?: string | null; participantId?: string | null },
+): Participant | null {
+  if (!event) {
+    return null;
+  }
+
+  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+    return null;
+  }
+
+  const participant = safeArray(event.participants).find((item) =>
+    (input.participantId && item.id === input.participantId) ||
+    (input.userId && item.userId === input.userId),
+  );
+
+  if (!participant) {
+    return null;
+  }
+
+  if (participant.status && participant.status !== "active") {
+    return null;
+  }
+
+  if (participant.availabilityState && participant.availabilityState !== "active") {
+    return null;
+  }
+
+  const currentRound = getCurrentRound(event);
+  if (!currentRound || currentRound.completed) {
+    return null;
+  }
+
+  return participant;
+}
+
 export function getJoinUrl(eventId: string): string {
   if (typeof window === "undefined") {
     return `/guest?eventId=${eventId}`;

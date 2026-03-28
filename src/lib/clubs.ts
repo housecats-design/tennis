@@ -8,8 +8,10 @@ import {
   ClubMember,
   ClubMembershipStatus,
   ClubRole,
+  UserProfile,
 } from "@/lib/types";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
+import { listProfiles } from "@/lib/users";
 
 const CLUBS_STORAGE_KEY = "tennis-clubs";
 const CLUB_MEMBERS_STORAGE_KEY = "tennis-club-members";
@@ -258,6 +260,130 @@ export function canApproveClubJoinRequests(role: ClubRole): boolean {
 
 export function canCreateClubEvent(role: ClubRole): boolean {
   return role === "leader" || role === "vice_leader";
+}
+
+export async function listMyApprovedClubs(userId: string): Promise<Array<{ club: Club; membership: ClubMember }>> {
+  const [memberships, clubs] = await Promise.all([listMyClubMemberships(userId), listActiveClubs()]);
+  const clubMap = new Map(clubs.map((club) => [club.id, club]));
+  return memberships
+    .filter((membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null)
+    .map((membership) => ({ club: clubMap.get(membership.clubId), membership }))
+    .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club));
+}
+
+export async function listClubApplicationsForUser(userId: string): Promise<ClubApplication[]> {
+  return listMyClubApplications(userId);
+}
+
+export async function buildClubHomeData(clubId: string): Promise<{
+  club: Club | null;
+  members: ClubMember[];
+  memberProfiles: UserProfile[];
+  clubStats: { matchesPlayed: number; wins: number; losses: number; points: number } | null;
+  memberRows: Array<{
+    userId: string;
+    displayName: string;
+    ntrp: number | null;
+    totalMatches: number;
+    totalWins: number;
+    totalLosses: number;
+    clubMatches: number;
+    clubWins: number;
+    clubLosses: number;
+    clubPoints: number;
+    lastActivityAt: string | null;
+  }>;
+}> {
+  const [club, members, profiles] = await Promise.all([
+    getClubById(clubId),
+    listClubMembers(clubId),
+    listProfiles(),
+  ]);
+
+  const approvedMembers = members.filter((member) => member.membershipStatus === "approved" && member.deletedAt == null && member.leftAt == null);
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+
+  let clubStats: { matchesPlayed: number; wins: number; losses: number; points: number } | null = null;
+  const totalStatsMap = new Map<string, { matchesPlayed: number; wins: number; losses: number; points: number }>();
+  const clubStatsMap = new Map<string, { matchesPlayed: number; wins: number; losses: number; points: number }>();
+  const activityMap = new Map<string, string>();
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+
+    const [clubStatsResult, totalStatsResult, byClubResult, historyResult] = await Promise.all([
+      supabase!.from("club_stats").select("matches_played, wins, losses, points").eq("club_id", clubId).maybeSingle(),
+      supabase!.from("player_stats_total").select("user_id, matches_played, wins, losses, points").in("user_id", approvedMembers.map((member) => member.userId)),
+      supabase!.from("player_stats_by_club").select("user_id, matches_played, wins, losses, points").eq("club_id", clubId).in("user_id", approvedMembers.map((member) => member.userId)),
+      supabase!.from("match_history").select("user_id, created_at").eq("club_id", clubId).in("user_id", approvedMembers.map((member) => member.userId)).order("created_at", { ascending: false }),
+    ]);
+
+    if (clubStatsResult.data) {
+      clubStats = {
+        matchesPlayed: clubStatsResult.data.matches_played ?? 0,
+        wins: clubStatsResult.data.wins ?? 0,
+        losses: clubStatsResult.data.losses ?? 0,
+        points: clubStatsResult.data.points ?? 0,
+      };
+    }
+
+    if (Array.isArray(totalStatsResult.data)) {
+      totalStatsResult.data.forEach((row) => {
+        totalStatsMap.set(row.user_id, {
+          matchesPlayed: row.matches_played ?? 0,
+          wins: row.wins ?? 0,
+          losses: row.losses ?? 0,
+          points: row.points ?? 0,
+        });
+      });
+    }
+
+    if (Array.isArray(byClubResult.data)) {
+      byClubResult.data.forEach((row) => {
+        clubStatsMap.set(row.user_id, {
+          matchesPlayed: row.matches_played ?? 0,
+          wins: row.wins ?? 0,
+          losses: row.losses ?? 0,
+          points: row.points ?? 0,
+        });
+      });
+    }
+
+    if (Array.isArray(historyResult.data)) {
+      historyResult.data.forEach((row) => {
+        if (!activityMap.has(row.user_id) && row.created_at) {
+          activityMap.set(row.user_id, row.created_at);
+        }
+      });
+    }
+  }
+
+  const memberRows = approvedMembers.map((member) => {
+    const profile = profileMap.get(member.userId);
+    const totalStats = totalStatsMap.get(member.userId) ?? { matchesPlayed: 0, wins: 0, losses: 0, points: 0 };
+    const clubOnlyStats = clubStatsMap.get(member.userId) ?? { matchesPlayed: 0, wins: 0, losses: 0, points: 0 };
+    return {
+      userId: member.userId,
+      displayName: profile?.displayName ?? member.userId,
+      ntrp: profile?.defaultNtrp ?? null,
+      totalMatches: totalStats.matchesPlayed,
+      totalWins: totalStats.wins,
+      totalLosses: totalStats.losses,
+      clubMatches: clubOnlyStats.matchesPlayed,
+      clubWins: clubOnlyStats.wins,
+      clubLosses: clubOnlyStats.losses,
+      clubPoints: clubOnlyStats.points,
+      lastActivityAt: activityMap.get(member.userId) ?? member.joinedAt ?? null,
+    };
+  });
+
+  return {
+    club,
+    members: approvedMembers,
+    memberProfiles: profiles,
+    clubStats,
+    memberRows,
+  };
 }
 
 export async function listClubMembers(clubId: string): Promise<ClubMember[]> {
