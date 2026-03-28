@@ -25,6 +25,7 @@ export type MatchStatus = "waiting" | "assigned" | "playing" | "score_pending" |
 export type MatchApprovalStatus = "pending" | "approved" | "rejected";
 export type MatchObjectionStatus = "pending" | "resolved" | "dismissed";
 export type InteractionType = "same_match" | "same_team" | "opponent" | "same_event";
+export type ParticipantActiveSessionStatus = "active" | "waiting" | "action_required" | "closed" | "expired";
 
 export type Player = {
   id: string;
@@ -134,6 +135,20 @@ export type Participant = {
   availabilityState?: ParticipantAvailabilityState;
   status?: EventParticipantStatus;
   leftAt?: string | null;
+  lastActiveAt?: string | null;
+  returnableUntil?: string | null;
+};
+
+export type ParticipantActiveSession = {
+  id: string;
+  eventId: string;
+  participantId: string;
+  userId: string;
+  currentRoundId?: string | null;
+  currentMatchId?: string | null;
+  sessionStatus: ParticipantActiveSessionStatus;
+  lastSeenAt: string;
+  expiresAt?: string | null;
 };
 
 export type Notification = {

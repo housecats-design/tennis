@@ -1,7 +1,7 @@
 "use client";
 
 import { getClubById } from "@/lib/clubs";
-import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent } from "@/lib/events";
+import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent, touchParticipantSession } from "@/lib/events";
 import { buildFinalRanking } from "@/lib/history";
 import { getCurrentProfile } from "@/lib/auth";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
@@ -148,6 +148,12 @@ export default function GuestEventPage() {
             : null,
         );
         setNotifications(event ? getEventNotifications(event, participant?.id) : []);
+        if (event && participant?.id) {
+          await touchParticipantSession(event.id, {
+            participantId: participant.id,
+            userId: participant.userId ?? profile?.id ?? null,
+          });
+        }
         setError(null);
       } catch (error) {
         console.error("[guest-event] sync failed", error);
@@ -262,6 +268,7 @@ export default function GuestEventPage() {
       scoreA,
       scoreB,
     });
+    await touchParticipantSession(eventId, { participantId });
     setScoreDraft({ scoreA: "", scoreB: "" });
     setPendingCustomScore(null);
   }
@@ -302,6 +309,7 @@ export default function GuestEventPage() {
     }
 
     await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response, reason);
+    await touchParticipantSession(eventId, { participantId });
     if (response === "accept") {
       window.alert("확인되었습니다.");
       setToastMessage("Moving to next round.");
@@ -319,6 +327,7 @@ export default function GuestEventPage() {
 
     try {
       const nextEvent = await markEventNotificationRead(eventId, notificationId);
+      await touchParticipantSession(eventId, { participantId });
       setCurrentEvent(nextEvent);
       setNotifications((current) =>
         current.map((notification) =>

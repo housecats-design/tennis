@@ -14,6 +14,8 @@ import {
   Match,
   Notification,
   Participant,
+  ParticipantActiveSession,
+  ParticipantActiveSessionStatus,
   ParticipantGender,
   ParticipantAvailabilityState,
   Player,
@@ -50,6 +52,20 @@ type EventRow = {
   updated_at: string | null;
 };
 
+type ParticipantActiveSessionRow = {
+  id: string;
+  event_id: string;
+  participant_id: string;
+  user_id: string;
+  current_round_id?: string | null;
+  current_match_id?: string | null;
+  session_status: ParticipantActiveSessionStatus;
+  last_seen_at: string | null;
+  expires_at?: string | null;
+};
+
+const RETURNABLE_SESSION_MINUTES = 90;
+
 function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
@@ -75,6 +91,8 @@ function normalizeParticipants(participants: EventRecord["participants"] | null 
     joinedAt: participant?.joinedAt ?? undefined,
     isActive: participant?.isActive ?? true,
     availabilityState: (participant?.availabilityState ?? "active") as ParticipantAvailabilityState,
+    lastActiveAt: participant?.lastActiveAt ?? null,
+    returnableUntil: participant?.returnableUntil ?? null,
   }));
 }
 
@@ -244,6 +262,207 @@ function makeId(prefix: string): string {
 
 function makeEventCode(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function addMinutes(date: Date, minutes: number): string {
+  return new Date(date.getTime() + minutes * 60_000).toISOString();
+}
+
+function isMissingSessionSchemaError(error: { code?: string; message?: string } | null | undefined): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return error?.code === "PGRST205" || message.includes("schema cache") || message.includes("does not exist");
+}
+
+function findCurrentMatchForParticipant(event: EventRecord, participantId: string): Match | null {
+  const currentRound = getCurrentRound(event);
+  if (!currentRound) {
+    return null;
+  }
+
+  return (
+    safeArray(currentRound.matches).find((match) =>
+      !match.skipped &&
+      [...safeArray(match.teamA), ...safeArray(match.teamB)].some((player) => player.id === participantId),
+    ) ?? null
+  );
+}
+
+function isParticipantActionRequired(event: EventRecord, participant: Participant): boolean {
+  const currentRound = getCurrentRound(event);
+  if (!currentRound || currentRound.completed) {
+    return false;
+  }
+
+  const currentMatch = findCurrentMatchForParticipant(event, participant.id);
+  if (!currentMatch) {
+    return false;
+  }
+
+  if (!currentMatch.scoreProposal) {
+    return true;
+  }
+
+  if (currentMatch.scoreProposal.status === "disputed") {
+    return false;
+  }
+
+  const alreadyAccepted = safeArray(currentMatch.scoreProposal.acceptedByParticipantIds).includes(participant.id);
+  const alreadyDisputed = safeArray(currentMatch.scoreProposal.disputedByParticipantIds).includes(participant.id);
+  if (alreadyAccepted || alreadyDisputed) {
+    return false;
+  }
+
+  if (currentMatch.scoreProposal.submittedByParticipantId === participant.id) {
+    return false;
+  }
+
+  return isConfirmationRequiredParticipant(event, participant.id);
+}
+
+function resolveParticipantSessionStatus(event: EventRecord, participant: Participant): ParticipantActiveSessionStatus {
+  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+    return "closed";
+  }
+
+  if (
+    (participant.status && participant.status !== "active") ||
+    (participant.availabilityState && participant.availabilityState !== "active")
+  ) {
+    return "closed";
+  }
+
+  const currentRound = getCurrentRound(event);
+  if (!currentRound || currentRound.completed) {
+    return "closed";
+  }
+
+  if (isParticipantActionRequired(event, participant)) {
+    return "action_required";
+  }
+
+  const currentMatch = findCurrentMatchForParticipant(event, participant.id);
+  if (currentMatch) {
+    return "active";
+  }
+
+  return "waiting";
+}
+
+function resolveSessionExpiry(status: ParticipantActiveSessionStatus): string | null {
+  if (status === "closed" || status === "expired") {
+    return null;
+  }
+
+  return addMinutes(new Date(), RETURNABLE_SESSION_MINUTES);
+}
+
+function buildParticipantSession(event: EventRecord, participant: Participant): ParticipantActiveSession | null {
+  if (!participant.userId) {
+    return null;
+  }
+
+  const currentRound = getCurrentRound(event);
+  const currentMatch = findCurrentMatchForParticipant(event, participant.id);
+  const sessionStatus = resolveParticipantSessionStatus(event, participant);
+
+  return {
+    id: participant.id,
+    eventId: event.id,
+    participantId: participant.id,
+    userId: participant.userId,
+    currentRoundId: currentRound?.id ?? null,
+    currentMatchId: currentMatch?.id ?? null,
+    sessionStatus,
+    lastSeenAt: new Date().toISOString(),
+    expiresAt: resolveSessionExpiry(sessionStatus),
+  };
+}
+
+async function persistParticipantPresence(event: EventRecord, participant: Participant): Promise<void> {
+  if (!isSupabaseEnabled() || !participant.id) {
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return;
+  }
+
+  const session = buildParticipantSession(event, participant);
+  const now = new Date().toISOString();
+  const nextReturnableUntil = session?.expiresAt ?? null;
+  const nextLastActiveAt = session ? now : participant.lastActiveAt ?? now;
+
+  const { error: participantError } = await supabase
+    .from("participants")
+    .upsert(
+      {
+        id: participant.id,
+        event_id: event.id,
+        user_id: participant.userId ?? null,
+        session_id: participant.sessionId ?? null,
+        display_name: participant.displayName,
+        gender: participant.gender,
+        skill_level: participant.skillLevel,
+        role: participant.role,
+        joined_at: participant.joinedAt ?? now,
+        is_active: participant.isActive ?? true,
+        last_active_at: nextLastActiveAt,
+        returnable_until: nextReturnableUntil,
+      },
+      { onConflict: "id" },
+    );
+
+  if (participantError && !isMissingSessionSchemaError(participantError)) {
+    console.error("[events] persist participant presence failed", participantError);
+  }
+
+  if (!session) {
+    return;
+  }
+
+  const { error: sessionError } = await supabase
+    .from("participant_active_sessions")
+    .upsert(
+      {
+        id: participant.id,
+        event_id: session.eventId,
+        participant_id: session.participantId,
+        user_id: session.userId,
+        current_round_id: session.currentRoundId,
+        current_match_id: session.currentMatchId,
+        session_status: session.sessionStatus,
+        last_seen_at: session.lastSeenAt,
+        expires_at: session.expiresAt,
+      },
+      { onConflict: "participant_id" },
+    );
+
+  if (sessionError && !isMissingSessionSchemaError(sessionError)) {
+    console.error("[events] persist participant session failed", sessionError);
+  }
+}
+
+async function syncEventParticipantSessions(event: EventRecord): Promise<void> {
+  await Promise.all(
+    safeArray(event.participants)
+      .filter((participant) => participant.userId)
+      .map((participant) => persistParticipantPresence(event, participant)),
+  );
+}
+
+function normalizeParticipantActiveSession(row: ParticipantActiveSessionRow): ParticipantActiveSession {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    participantId: row.participant_id,
+    userId: row.user_id,
+    currentRoundId: row.current_round_id ?? null,
+    currentMatchId: row.current_match_id ?? null,
+    sessionStatus: row.session_status,
+    lastSeenAt: row.last_seen_at ?? new Date().toISOString(),
+    expiresAt: row.expires_at ?? null,
+  };
 }
 
 function stampEvent(event: EventRecord): EventRecord {
@@ -605,6 +824,7 @@ async function updateEvent(eventId: string, updater: (event: EventRecord) => Eve
 
   const nextEvent = stampEvent(updater(currentEvent));
   await persistEvent(nextEvent);
+  await syncEventParticipantSessions(nextEvent);
   emitEventUpdate(nextEvent);
   return nextEvent;
 }
@@ -789,6 +1009,7 @@ export async function createEvent(input: {
   };
 
   await persistEvent(event);
+  await syncEventParticipantSessions(event);
   emitEventUpdate(event);
   return { event, hostParticipant };
 }
@@ -1901,6 +2122,107 @@ export function getCurrentRound(event: EventRecord): Round | null {
     : null;
 }
 
+export async function touchParticipantSession(
+  eventId: string,
+  input: { participantId?: string | null; userId?: string | null },
+): Promise<void> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return;
+  }
+
+  const participant =
+    safeArray(event.participants).find((item) => input.participantId && item.id === input.participantId) ??
+    safeArray(event.participants).find((item) => input.userId && item.userId === input.userId) ??
+    null;
+
+  if (!participant) {
+    return;
+  }
+
+  await persistParticipantPresence(event, participant);
+}
+
+export async function loadReturnableParticipationSession(
+  userId: string,
+): Promise<{ event: EventRecord; participant: Participant; session: ParticipantActiveSession } | null> {
+  if (!userId) {
+    return null;
+  }
+
+  if (!isSupabaseEnabled()) {
+    return null;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("participant_active_sessions")
+    .select("id, event_id, participant_id, user_id, current_round_id, current_match_id, session_status, last_seen_at, expires_at")
+    .eq("user_id", userId)
+    .in("session_status", ["active", "waiting", "action_required"])
+    .order("last_seen_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if (!isMissingSessionSchemaError(error)) {
+      console.error("[events] load returnable session failed", error);
+    }
+    return null;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const session = normalizeParticipantActiveSession(data as ParticipantActiveSessionRow);
+  if (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now()) {
+    await supabase
+      .from("participant_active_sessions")
+      .update({ session_status: "expired", expires_at: session.expiresAt })
+      .eq("participant_id", session.participantId);
+    return null;
+  }
+
+  const event = await loadEvent(session.eventId);
+  const participant = getReturnableParticipant(event, {
+    userId,
+    participantId: session.participantId,
+  });
+
+  if (!event || !participant) {
+    await supabase
+      .from("participant_active_sessions")
+      .update({ session_status: "closed", expires_at: null })
+      .eq("participant_id", session.participantId);
+    return null;
+  }
+
+  const nextStatus = resolveParticipantSessionStatus(event, participant);
+  if (nextStatus === "closed" || nextStatus === "expired") {
+    await persistParticipantPresence(event, participant);
+    return null;
+  }
+
+  await persistParticipantPresence(event, participant);
+  return {
+    event,
+    participant,
+    session: {
+      ...session,
+      sessionStatus: nextStatus,
+      currentRoundId: getCurrentRound(event)?.id ?? null,
+      currentMatchId: findCurrentMatchForParticipant(event, participant.id)?.id ?? null,
+      expiresAt: resolveSessionExpiry(nextStatus),
+      lastSeenAt: new Date().toISOString(),
+    },
+  };
+}
+
 export function getReturnableParticipant(
   event: EventRecord | null,
   input: { userId?: string | null; participantId?: string | null },
@@ -1927,6 +2249,10 @@ export function getReturnableParticipant(
   }
 
   if (participant.availabilityState && participant.availabilityState !== "active") {
+    return null;
+  }
+
+  if (participant.returnableUntil && new Date(participant.returnableUntil).getTime() <= Date.now()) {
     return null;
   }
 

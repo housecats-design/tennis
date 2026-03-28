@@ -2,7 +2,7 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { getClubById, listMyClubMemberships } from "@/lib/clubs";
-import { findEventByCodeOrName, getInvitationById, joinEvent, loadEvent } from "@/lib/events";
+import { findEventByCodeOrName, getInvitationById, joinEvent, loadEvent, loadReturnableParticipationSession } from "@/lib/events";
 import { saveLastEvent, saveLastParticipant, savePostLoginRedirect } from "@/lib/storage";
 import { ParticipantGender, UserProfile } from "@/lib/types";
 import Link from "next/link";
@@ -27,6 +27,8 @@ export default function GuestPage() {
 
   useEffect(() => {
     const sync = async () => {
+      const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const hasDirectEventTarget = Boolean(searchParams?.get("eventId") || searchParams?.get("invite"));
       const currentProfile = await getCurrentProfile();
       setProfile(currentProfile);
       setDisplayName(currentProfile?.displayName ?? "");
@@ -44,6 +46,17 @@ export default function GuestPage() {
         setAvailableClubs(clubs.filter(Boolean) as Array<{ id: string; name: string }>);
       }
       setCheckingAuth(false);
+
+      if (currentProfile?.id && !hasDirectEventTarget) {
+        const activeSession = await loadReturnableParticipationSession(currentProfile.id);
+        if (activeSession && activeSession.participant.role !== "host") {
+          const shouldResume = window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?");
+          if (shouldResume) {
+            router.replace(`/guest/event/${activeSession.event.id}`);
+            return;
+          }
+        }
+      }
     };
 
     void sync();

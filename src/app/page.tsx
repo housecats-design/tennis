@@ -11,7 +11,7 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { getReturnableParticipant, joinEvent, loadEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { getReturnableParticipant, joinEvent, loadEvent, loadReturnableParticipationSession, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
 import {
   clearLastParticipation,
   clearPostLoginRedirect,
@@ -51,7 +51,7 @@ export default function HomePage() {
   const [submitting, setSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [resumeEventId, setResumeEventId] = useState<string | null>(null);
+  const [resumeRoute, setResumeRoute] = useState<string | null>(null);
   const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
 
   function formatNotificationTime(value: string): string {
@@ -86,21 +86,38 @@ export default function HomePage() {
       setProfile(nextProfile);
       if (nextProfile?.id) {
         setInvitations(await loadUserInvitations(nextProfile.id));
-        const lastEventId = loadLastEvent();
-        const lastParticipantId = loadLastParticipant();
-        const lastEvent = lastEventId ? await loadEvent(lastEventId) : null;
-        const returnableParticipant = getReturnableParticipant(lastEvent, {
-          userId: nextProfile.id,
-          participantId: lastParticipantId,
-        });
-        const canResume = Boolean(returnableParticipant && returnableParticipant.role !== "host");
-        if (!canResume) {
-          clearLastParticipation();
+        const activeSession = await loadReturnableParticipationSession(nextProfile.id);
+        if (activeSession) {
+          saveLastEvent(activeSession.event.id);
+          saveLastParticipant(activeSession.participant.id);
+          setResumeRoute(
+            activeSession.participant.role === "host"
+              ? `/host/event/${activeSession.event.id}`
+              : `/guest/event/${activeSession.event.id}`,
+          );
+        } else {
+          const lastEventId = loadLastEvent();
+          const lastParticipantId = loadLastParticipant();
+          const lastEvent = lastEventId ? await loadEvent(lastEventId) : null;
+          const returnableParticipant = getReturnableParticipant(lastEvent, {
+            userId: nextProfile.id,
+            participantId: lastParticipantId,
+          });
+          const canResume = Boolean(returnableParticipant && lastEvent);
+          if (!canResume) {
+            clearLastParticipation();
+          }
+          setResumeRoute(
+            canResume && lastEvent
+              ? returnableParticipant?.role === "host"
+                ? `/host/event/${lastEvent.id}`
+                : `/guest/event/${lastEvent.id}`
+              : null,
+          );
         }
-        setResumeEventId(canResume && lastEvent ? lastEvent.id : null);
       } else {
         setInvitations([]);
-        setResumeEventId(null);
+        setResumeRoute(null);
       }
       setAuthLoading(false);
     };
@@ -199,7 +216,17 @@ export default function HomePage() {
 
   function handleRoleSelect(role: AppRole): void {
     saveLastRole(role);
-    router.push(role === "host" ? "/host" : "/guest");
+    if (role === "host") {
+      router.push(resumeRoute?.startsWith("/host/") ? resumeRoute : "/host");
+      return;
+    }
+
+    if (resumeRoute?.startsWith("/guest/") && window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?")) {
+      router.push(resumeRoute);
+      return;
+    }
+
+    router.push("/guest");
   }
 
   const lastRole = loadLastRole();
@@ -358,12 +385,12 @@ export default function HomePage() {
                 <Link href="/clubs" className="poster-button-secondary">
                   클럽
                 </Link>
-                {resumeEventId ? (
+                {resumeRoute ? (
                   <button
                     type="button"
                     onClick={() => {
                       if (window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?")) {
-                        router.push(`/guest/event/${resumeEventId}`);
+                        router.push(resumeRoute);
                       }
                     }}
                     className="poster-button-secondary"
