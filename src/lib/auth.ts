@@ -130,7 +130,7 @@ export async function signUpAccount(input: {
   confirmPassword: string;
   realName: string;
   nickname: string;
-  gender: "male" | "female" | "other";
+  gender: "male" | "female";
 }): Promise<UserProfile> {
   const loginId = input.loginId.trim().toLowerCase();
   const email = input.email.trim().toLowerCase();

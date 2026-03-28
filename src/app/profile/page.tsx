@@ -12,6 +12,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [nickname, setNickname] = useState("");
   const [gender, setGender] = useState<ParticipantGender | "">("");
+  const [defaultNtrp, setDefaultNtrp] = useState("3.5");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +29,7 @@ export default function ProfilePage() {
       setProfile(nextProfile);
       setNickname(nextProfile.nickname);
       setGender(nextProfile.gender === "unspecified" ? "" : nextProfile.gender);
+      setDefaultNtrp(typeof nextProfile.defaultNtrp === "number" ? nextProfile.defaultNtrp.toFixed(1) : "3.5");
       setLoading(false);
     };
 
@@ -47,6 +49,7 @@ export default function ProfilePage() {
       const nextProfile = await updateProfileSettings(profile.id, {
         nickname,
         gender: (gender || "unspecified") as ParticipantGender,
+        defaultNtrp: Number(defaultNtrp),
       });
       setProfile(nextProfile);
       setInfo("프로필 설정이 저장되었습니다.");
@@ -99,11 +102,16 @@ export default function ProfilePage() {
             className="poster-input disabled:opacity-70"
           >
             <option value="">선택</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
+            <option value="male">남자</option>
+            <option value="female">여자</option>
           </select>
           <span className="text-xs text-ink/60">You can only set your gender once. If you want to change it, contact the admin.</span>
+          <span className="text-xs text-ink/60">성별은 1회만 설정할 수 있습니다. 변경이 필요하면 관리자에게 문의하세요.</span>
+        </label>
+
+        <label className="grid gap-2 text-sm font-semibold">
+          기본 NTRP
+          <input value={defaultNtrp} onChange={(event) => setDefaultNtrp(event.target.value)} className="poster-input" />
         </label>
 
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}

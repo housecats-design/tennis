@@ -394,6 +394,10 @@ async function loadEventsFromSource(): Promise<EventRecord[]> {
   }
 }
 
+export async function loadAllEvents(): Promise<EventRecord[]> {
+  return loadEventsFromSource();
+}
+
 function emitEventUpdate(event: EventRecord): void {
   const channel = createEventBroadcastChannel(event.id);
   channel?.postMessage({ type: "event_updated", eventId: event.id });
@@ -1078,11 +1082,17 @@ export async function respondToScoreProposal(
   const nextEvent = await updateEvent(eventId, (event) => {
     const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
     const actorParticipant = safeArray(event.participants).find((participant) => participant.id === participantId);
+    const hasExistingDisputeNotification = safeArray(event.notifications).some(
+      (notification) =>
+        notification.type === "dispute" &&
+        notification.metadata?.matchId === matchId &&
+        notification.metadata?.participantId === participantId,
+    );
 
     return withDerivedEventState({
       ...event,
       notifications:
-        response === "dispute" && hostParticipant
+        response === "dispute" && hostParticipant && !hasExistingDisputeNotification
           ? [
               ...event.notifications,
               createEventNotification({
@@ -1092,6 +1102,11 @@ export async function respondToScoreProposal(
                 targetUserId: hostParticipant.userId ?? null,
                 message: `점수 이의신청 발생: Round ${roundNumber}, Match ${matchId}`,
                 type: "dispute",
+                metadata: {
+                  matchId,
+                  participantId,
+                  roundNumber,
+                },
               }),
             ]
           : event.notifications,
@@ -1304,11 +1319,19 @@ export async function forceCloseRound(
       ...currentEvent,
       rounds: nextRounds,
       status: (nextRounds.every((round) => round.completed) ? "finished" : "in_progress") as EventRecord["status"],
-      notifications: notifyRoundCompletion({
-        event: currentEvent,
-        rounds: nextRounds,
-        completedRoundNumber: roundNumber,
-      }),
+      notifications: [
+        ...notifyRoundCompletion({
+          event: currentEvent,
+          rounds: nextRounds,
+          completedRoundNumber: roundNumber,
+        }),
+        createEventNotification({
+          eventId,
+          roundNumber,
+          message: "호스트가 현재 라운드를 강제 종료했습니다.",
+          type: "warning",
+        }),
+      ],
       auditLogs: audit
         ? appendAuditLog(currentEvent, {
             eventId,
@@ -1361,6 +1384,15 @@ export async function reassignRound(
             reason: audit.reason ?? null,
           })
         : currentEvent.auditLogs ?? [],
+      notifications: [
+        ...currentEvent.notifications,
+        createEventNotification({
+          eventId,
+          roundNumber,
+          message: "호스트가 라운드 배정을 변경했습니다. 화면을 다시 확인해 주세요.",
+          type: "warning",
+        }),
+      ],
       rounds: currentEvent.rounds.map((round) => {
         if (round.roundNumber < roundNumber) {
           return round;
@@ -1529,6 +1561,16 @@ export async function reassignSingleMatch(
             reason: audit.reason ?? null,
           })
         : currentEvent.auditLogs ?? [],
+      notifications: [
+        ...currentEvent.notifications,
+        createEventNotification({
+          eventId,
+          roundNumber,
+          message: "호스트가 일부 경기 배정을 변경했습니다. 점수/확인 상태가 초기화되었습니다.",
+          type: "warning",
+          metadata: { matchId },
+        }),
+      ],
       rounds: currentEvent.rounds.map((round) =>
         round.roundNumber !== roundNumber
           ? round

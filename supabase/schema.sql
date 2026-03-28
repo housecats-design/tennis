@@ -25,6 +25,7 @@ create table if not exists user_profiles (
   display_name text not null,
   gender text default 'unspecified',
   gender_locked_at timestamptz,
+  default_ntrp numeric,
   is_admin boolean default false,
   memo text default '',
   is_deleted boolean default false,

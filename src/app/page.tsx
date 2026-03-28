@@ -11,9 +11,11 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { joinEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { joinEvent, loadEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
 import {
   clearPostLoginRedirect,
+  loadLastEvent,
+  loadLastParticipant,
   loadLastRole,
   loadPostLoginRedirect,
   saveLastEvent,
@@ -48,7 +50,34 @@ export default function HomePage() {
   const [submitting, setSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [resumeEventId, setResumeEventId] = useState<string | null>(null);
   const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
+
+  function formatNotificationTime(value: string): string {
+    const date = new Date(value);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMinutes = Math.floor(diffMs / 60000);
+
+    if (diffMinutes < 60) {
+      return `${Math.max(diffMinutes, 0)}분 전`;
+    }
+
+    const sameDate = now.toDateString() === date.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = yesterday.toDateString() === date.toDateString();
+
+    if (sameDate) {
+      return `오늘 ${date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+    }
+
+    if (isYesterday) {
+      return `어제 ${date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+    }
+
+    return date.toLocaleString("ko-KR");
+  }
 
   useEffect(() => {
     const sync = async () => {
@@ -56,8 +85,21 @@ export default function HomePage() {
       setProfile(nextProfile);
       if (nextProfile?.id) {
         setInvitations(await loadUserInvitations(nextProfile.id));
+        const lastEventId = loadLastEvent();
+        const lastParticipantId = loadLastParticipant();
+        const lastEvent = lastEventId ? await loadEvent(lastEventId) : null;
+        setResumeEventId(
+          lastEvent &&
+            lastParticipantId &&
+            lastEvent.status !== "finished" &&
+            lastEvent.status !== "completed" &&
+            lastEvent.participants.some((participant) => participant.id === lastParticipantId || participant.userId === nextProfile.id)
+            ? lastEvent.id
+            : null,
+        );
       } else {
         setInvitations([]);
+        setResumeEventId(null);
       }
       setAuthLoading(false);
     };
@@ -71,6 +113,20 @@ export default function HomePage() {
       unsubscribe?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void loadUserInvitations(profile.id).then(setInvitations);
+    }, 2500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [profile?.id]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -108,7 +164,7 @@ export default function HomePage() {
           email: normalizedEmail,
           realName,
           nickname,
-          gender: gender as "male" | "female" | "other",
+          gender: gender as "male" | "female",
           password,
           confirmPassword,
         });
@@ -232,8 +288,8 @@ export default function HomePage() {
 
       const participant = await joinEvent(invitation.eventId, {
         displayName: profile.displayName,
-        gender: profile.gender === "unspecified" ? "other" : profile.gender,
-        guestNtrp: null,
+        gender: profile.gender === "female" ? "female" : "male",
+        guestNtrp: profile.defaultNtrp ?? null,
         userId: profile.id,
         inviteId: invitation.id,
       });
@@ -292,6 +348,19 @@ export default function HomePage() {
                 <Link href="/profile" className="poster-button-secondary">
                   프로필 설정
                 </Link>
+                {resumeEventId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?")) {
+                        router.push(`/guest/event/${resumeEventId}`);
+                      }
+                    }}
+                    className="poster-button-secondary"
+                  >
+                    진행중인 경기로 돌아가기
+                  </button>
+                ) : null}
                 <button type="button" onClick={() => void signOutAccount()} className="poster-button-secondary">
                   로그아웃
                 </button>
@@ -299,6 +368,27 @@ export default function HomePage() {
               {lastRole ? (
                 <div className="mt-4 text-xs text-ink/55">메인 페이지 최근 선택 역할: {lastRole === "host" ? "호스트" : "플레이어"}</div>
               ) : null}
+              <div className="mt-8 border-t border-line pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="text-xl font-black">최근 초대 및 중요 알림 <span className="text-accentStrong">[{invitations.length}]</span></div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {invitations.length > 0 ? invitations.slice(0, 6).map((invitation) => (
+                    <div key={invitation.id} className="border-b border-line py-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-semibold">
+                          {invitation.status === "pending" ? "초대 도착" : invitation.status === "accepted" ? "초대 수락" : invitation.status === "declined" ? "초대 거절" : "초대 만료"}
+                        </div>
+                        <div className="text-xs text-ink/55">{formatNotificationTime(invitation.createdAt)}</div>
+                      </div>
+                      <div className="mt-1 text-ink/80">{invitation.eventName}</div>
+                      <div className="mt-1 text-xs text-ink/55">{invitation.status === "pending" ? "읽지 않음" : "읽음"}</div>
+                    </div>
+                  )) : (
+                    <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">최근 초대 및 중요 알림이 없습니다.</div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>
@@ -371,9 +461,8 @@ export default function HomePage() {
                   성별
                   <select value={gender} onChange={(event) => setGender(event.target.value as ParticipantGender)} className="poster-input">
                     <option value="">선택</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
+                    <option value="male">남자</option>
+                    <option value="female">여자</option>
                   </select>
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
@@ -450,43 +539,6 @@ export default function HomePage() {
         ) : null}
         {!profile && authLoading ? <div className="border-y border-line py-8 text-sm text-ink/70">세션을 확인하는 중...</div> : null}
       </section>
-      {profile ? (
-        <section className="border-t border-line py-10">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="poster-label">Notification Center</p>
-              <h2 className="mt-2 text-3xl font-black tracking-[-0.03em]">최근 초대 및 중요 알림</h2>
-            </div>
-            <div className="text-sm text-ink/55">{invitations.length}개</div>
-          </div>
-          <div className="mt-5 space-y-3">
-            {invitations.length > 0 ? invitations.slice(0, 6).map((invitation) => (
-              <div key={invitation.id} className="border-b border-line py-4">
-                <div className="text-sm font-semibold">
-                  {invitation.eventName} · {invitation.status === "pending" ? "초대 대기" : invitation.status === "accepted" ? "수락" : invitation.status === "declined" ? "거절" : "만료"}
-                </div>
-                <div className="mt-1 text-sm text-ink/68">
-                  호스트 {invitation.invitedByName} · 코드 {invitation.code}
-                </div>
-                {invitation.status === "pending" ? (
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    <button type="button" onClick={() => void handleInvitationResponse(invitation, "accept")} className="poster-button">
-                      수락하고 참여
-                    </button>
-                    <button type="button" onClick={() => void handleInvitationResponse(invitation, "decline")} className="poster-button-secondary">
-                      거절
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            )) : (
-              <div className="border-b border-dashed border-line py-4 text-sm text-ink/68">
-                아직 확인할 초대나 중요 알림이 없습니다.
-              </div>
-            )}
-          </div>
-        </section>
-      ) : null}
     </main>
   );
 }

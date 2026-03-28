@@ -21,7 +21,28 @@ function formatNotificationTime(value: string | null | undefined): string {
     return "--:--";
   }
 
+  const now = new Date();
+  const diffMinutes = Math.floor((now.getTime() - date.getTime()) / 60000);
+  if (diffMinutes < 60) {
+    return `${Math.max(diffMinutes, 0)}분 전`;
+  }
+
+  const sameDate = now.toDateString() === date.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = yesterday.toDateString() === date.toDateString();
+
+  if (sameDate) {
+    return `오늘 ${new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date)}`;
+  }
+
+  if (isYesterday) {
+    return `어제 ${new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date)}`;
+  }
+
   return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -442,7 +463,7 @@ export default function GuestEventPage() {
                       disabled={hasAcceptedProposal || hasDisputedProposal}
                       className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
                     >
-                      이의신청
+                      {hasDisputedProposal ? "이의신청중입니다" : "이의신청"}
                     </button>
                   </div>
                 ) : (

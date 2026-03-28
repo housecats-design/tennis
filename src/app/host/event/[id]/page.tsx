@@ -171,6 +171,11 @@ export default function HostEventPage() {
     const existingUserIds = new Set((event?.participants ?? []).map((participant) => participant.userId).filter(Boolean));
     return members.filter((member) => !member.isDeleted && member.id !== profile?.id && !existingUserIds.has(member.id));
   }, [event?.participants, members, profile?.id]);
+  const recommendedInviteMembers = useMemo(() => {
+    const invitedUserIds = new Set((event?.invitations ?? []).filter((invitation) => invitation.status === "pending" || invitation.status === "accepted").map((invitation) => invitation.invitedUserId));
+    const availableUserIds = new Set(availableMembers.map((member) => member.id));
+    return recommendedMembers.filter((member) => availableUserIds.has(member.userId) && !invitedUserIds.has(member.userId));
+  }, [availableMembers, event?.invitations, recommendedMembers]);
   const finalRanking = useMemo(() => (event?.status === "completed" || event?.status === "finished" ? buildFinalRanking(event) : []), [event]);
   const hostParticipantId = useMemo(
     () => event?.participants.find((participant) => participant.role === "host")?.id ?? null,
@@ -270,7 +275,7 @@ export default function HostEventPage() {
       })),
     });
     setEvent(nextEvent);
-    setRoundActionInfo("초대 링크를 저장했습니다. 로그인 중인 회원은 즉시 확인할 수 있고, 오프라인 회원은 다음 로그인 시 인박스에서 확인합니다.");
+    setRoundActionInfo("초대되었습니다.");
   }
 
   async function handleAddMemberParticipant(): Promise<void> {
@@ -379,6 +384,9 @@ export default function HostEventPage() {
       return;
     }
 
+    if (!window.confirm("이 라운드의 배정을 변경하시겠습니까? 현재 점수/확인 상태는 초기화될 수 있습니다.")) {
+      return;
+    }
     const reason = window.prompt("라운드 재배정 사유를 입력하세요. (선택)");
     const nextEvent = await reassignRound(event.id, roundNumber, profile ? {
       actorUserId: profile.id,
@@ -429,6 +437,9 @@ export default function HostEventPage() {
       return;
     }
 
+    if (!window.confirm("이 라운드를 강제 종료하시겠습니까? 진행 중 점수와 확인 상태는 모두 종료 처리됩니다.")) {
+      return;
+    }
     const reason = window.prompt("강제 종료 사유를 입력하세요. (선택)");
     const nextEvent = await forceCloseRound(event.id, roundNumber, profile ? {
       actorUserId: profile.id,
@@ -443,6 +454,9 @@ export default function HostEventPage() {
       return;
     }
 
+    if (!window.confirm("이 경기의 선수를 변경하시겠습니까? 현재 점수/확인 상태는 초기화됩니다.")) {
+      return;
+    }
     const reason = window.prompt("이 경기 재배정 사유를 입력하세요. (선택)");
     const nextEvent = await reassignSingleMatch(event.id, roundNumber, matchId, profile ? {
       actorUserId: profile.id,
@@ -669,7 +683,7 @@ export default function HostEventPage() {
           <div className="mt-6 border-t border-line pt-4">
             <div className="text-sm font-semibold text-ink">이전 이벤트 기반 추천 회원</div>
             <div className="mt-3 space-y-3">
-              {recommendedMembers.length > 0 ? recommendedMembers.slice(0, 8).map((member) => {
+              {recommendedInviteMembers.length > 0 ? recommendedInviteMembers.slice(0, 8).map((member) => {
                 const invitationStatus = (event.invitations ?? []).find((invitation) => invitation.invitedUserId === member.userId)?.status ?? null;
                 return (
                   <div key={member.userId} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 text-sm">

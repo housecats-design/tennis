@@ -28,6 +28,7 @@ export default function GuestPage() {
       setProfile(currentProfile);
       setDisplayName(currentProfile?.displayName ?? "");
       setGender(currentProfile?.gender && currentProfile.gender !== "unspecified" ? currentProfile.gender : "");
+      setGuestNtrp(currentProfile?.defaultNtrp ?? 3.5);
       setCheckingAuth(false);
     };
 
@@ -84,8 +85,8 @@ export default function GuestPage() {
 
           const participant = await joinEvent(targetEvent.id, {
             displayName: profile.displayName,
-            gender: profile.gender === "unspecified" ? "other" : profile.gender,
-            guestNtrp: null,
+            gender: profile.gender === "female" ? "female" : "male",
+            guestNtrp: profile.defaultNtrp ?? null,
             userId: profile.id,
             inviteId,
           });
@@ -205,7 +206,6 @@ export default function GuestPage() {
             <option value="">선택</option>
               <option value="male">남성</option>
               <option value="female">여성</option>
-              <option value="other">기타</option>
             </select>
           </label>
 

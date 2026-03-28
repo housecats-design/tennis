@@ -133,7 +133,6 @@ export default function AdminUserDetailPage() {
           <select value={gender} onChange={(event) => setGender(event.target.value as ParticipantGender)} className="poster-input">
             <option value="male">남성</option>
             <option value="female">여성</option>
-            <option value="other">기타</option>
             <option value="unspecified">미정</option>
           </select>
         </div>

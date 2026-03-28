@@ -15,6 +15,7 @@ type UserProfileRow = {
   display_name: string;
   gender?: ParticipantGender | null;
   gender_locked_at?: string | null;
+  default_ntrp?: number | null;
   is_admin: boolean | null;
   memo: string | null;
   is_deleted: boolean | null;
@@ -110,6 +111,7 @@ function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?
     displayName,
     gender: normalizeGender(row.gender as string | null | undefined),
     genderLockedAt: row.gender_locked_at ?? null,
+    defaultNtrp: typeof row.default_ntrp === "number" ? row.default_ntrp : null,
     isAdmin: Boolean(row.is_admin),
     memo: row.memo ?? "",
     isDeleted: Boolean(row.is_deleted),
@@ -155,7 +157,7 @@ async function loadProfileByField(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, default_ntrp, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .eq(field, value)
     .maybeSingle();
 
@@ -240,6 +242,7 @@ export async function ensureUserProfile(input: {
   realName?: string;
   nickname?: string;
   gender?: ParticipantGender;
+  defaultNtrp?: number | null;
 }): Promise<UserProfile> {
   const identityEmail = input.identity.email.toLowerCase();
   const current =
@@ -269,6 +272,7 @@ export async function ensureUserProfile(input: {
     displayName: nextDisplayName,
     gender: current?.gender ?? normalizeGender(input.gender),
     genderLockedAt: current?.genderLockedAt ?? (input.gender && input.gender !== "unspecified" ? new Date().toISOString() : null),
+    defaultNtrp: typeof input.defaultNtrp === "number" ? input.defaultNtrp : current?.defaultNtrp ?? null,
     isAdmin: current?.isAdmin ?? false,
     memo: current?.memo ?? "",
     isDeleted: current?.isDeleted ?? false,
@@ -294,6 +298,7 @@ export async function ensureUserProfile(input: {
     display_name: profile.displayName,
     gender: profile.gender,
     gender_locked_at: profile.genderLockedAt ?? null,
+    default_ntrp: profile.defaultNtrp ?? null,
     is_admin: profile.isAdmin,
     memo: profile.memo,
     is_deleted: profile.isDeleted,
@@ -320,6 +325,7 @@ export async function ensureUserProfile(input: {
         display_name: profile.displayName,
         gender: profile.gender,
         gender_locked_at: profile.genderLockedAt ?? null,
+        default_ntrp: profile.defaultNtrp ?? null,
         is_admin: profile.isAdmin,
         memo: profile.memo,
         is_deleted: profile.isDeleted,
@@ -359,7 +365,7 @@ export async function listProfiles(): Promise<UserProfile[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, default_ntrp, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
@@ -397,7 +403,7 @@ export async function updateUserMemo(userId: string, memo: string): Promise<User
 
 export async function updateProfileSettings(
   userId: string,
-  input: { nickname?: string; gender?: ParticipantGender },
+  input: { nickname?: string; gender?: ParticipantGender; defaultNtrp?: number | null },
 ): Promise<UserProfile | null> {
   const current = await getProfileById(userId);
   if (!current) {
@@ -419,6 +425,7 @@ export async function updateProfileSettings(
       nextGender !== "unspecified"
         ? current.genderLockedAt ?? new Date().toISOString()
         : current.genderLockedAt ?? null,
+    defaultNtrp: typeof input.defaultNtrp === "number" ? input.defaultNtrp : current.defaultNtrp ?? null,
     updatedAt: new Date().toISOString(),
   };
   cacheProfile(nextProfile);
@@ -432,6 +439,7 @@ export async function updateProfileSettings(
         display_name: nextProfile.displayName,
         gender: nextProfile.gender,
         gender_locked_at: nextProfile.genderLockedAt ?? null,
+        default_ntrp: nextProfile.defaultNtrp ?? null,
         updated_at: nextProfile.updatedAt,
       })
       .eq("user_id", userId);

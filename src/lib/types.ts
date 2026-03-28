@@ -212,6 +212,7 @@ export type UserProfile = {
   displayName: string;
   gender: ParticipantGender;
   genderLockedAt?: string | null;
+  defaultNtrp?: number | null;
   isAdmin: boolean;
   memo: string;
   isDeleted: boolean;

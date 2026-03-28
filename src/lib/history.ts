@@ -1,5 +1,6 @@
 "use client";
 
+import { loadAllEvents } from "@/lib/events";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { accumulateRoundStats, createStatsRecord, createEmptyStats } from "@/lib/stats";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
@@ -398,7 +399,7 @@ export async function loadHostSavedEvents(userId: string): Promise<SavedEventSum
 }
 
 export async function loadRecommendedPlayersForHost(userId: string): Promise<Array<{ userId: string; displayName: string; email?: string | null }>> {
-  const [events, profiles] = await Promise.all([loadHostSavedEvents(userId), listProfiles()]);
+  const [events, liveEvents, profiles] = await Promise.all([loadHostSavedEvents(userId), loadAllEvents(), listProfiles()]);
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
   const map = new Map<string, { userId: string; displayName: string; email?: string | null }>();
 
@@ -412,6 +413,25 @@ export async function loadRecommendedPlayersForHost(userId: string): Promise<Arr
       map.set(player.userId, {
         userId: player.userId,
         displayName: profile?.displayName ?? player.name,
+        email: profile?.email ?? null,
+      });
+    }
+  }
+
+  const recentLiveEvents = liveEvents
+    .filter((event) => event.hostUserId === userId)
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+
+  for (const event of recentLiveEvents) {
+    for (const participant of event.participants) {
+      if (!participant.userId || participant.userId === userId) {
+        continue;
+      }
+
+      const profile = profileMap.get(participant.userId);
+      map.set(participant.userId, {
+        userId: participant.userId,
+        displayName: profile?.displayName ?? participant.displayName,
         email: profile?.email ?? null,
       });
     }
