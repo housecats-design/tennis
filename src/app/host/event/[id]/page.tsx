@@ -20,12 +20,12 @@ import {
   saveParticipants,
   skipMatch,
   subscribeToEvent,
+  updateRoundMatchAssignment,
   updateMatchScores,
 } from "@/lib/events";
 import { buildFinalRanking, loadRecommendedPlayersForHost, saveCompletedEventRecord } from "@/lib/history";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
-import { loadLastRole } from "@/lib/storage";
 import { listProfiles } from "@/lib/users";
 import { Participant, PlayerStats, SkillLevel, UserProfile } from "@/lib/types";
 import Link from "next/link";
@@ -69,6 +69,7 @@ export default function HostEventPage() {
   const [roundActionInfo, setRoundActionInfo] = useState<string | null>(null);
   const [roundActionPending, setRoundActionPending] = useState<string | null>(null);
   const [recommendedMembers, setRecommendedMembers] = useState<Array<{ userId: string; displayName: string; email?: string | null }>>([]);
+  const [matchEditDrafts, setMatchEditDrafts] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (!eventId) {
@@ -97,8 +98,7 @@ export default function HostEventPage() {
           listProfiles(),
           loadEvent(eventId),
         ]);
-        const lastRole = loadLastRole();
-        if (!nextProfile || lastRole === "player" || (nextEvent && nextEvent.hostUserId !== nextProfile.id)) {
+        if (!nextProfile || (nextEvent && nextEvent.hostUserId !== nextProfile.id)) {
           router.replace(nextEvent ? `/guest/event/${nextEvent.id}` : "/");
           return;
         }
@@ -225,13 +225,24 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextParticipants = event.participants.filter((participant) => participant.id !== participantId);
-    const nextEvent = await saveParticipants(event.id, nextParticipants);
-    setEvent(nextEvent);
+    try {
+      const nextParticipants = event.participants.filter((participant) => participant.id !== participantId);
+      const nextEvent = await saveParticipants(event.id, nextParticipants);
+      setEvent(nextEvent);
+      setError(null);
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "참가자 삭제에 실패했습니다.");
+    }
   }
 
   async function handleAddParticipant(): Promise<void> {
     if (!event || !newPlayerName.trim()) {
+      return;
+    }
+
+    const normalizedName = newPlayerName.trim().toLowerCase();
+    if (event.participants.some((participant) => participant.displayName.trim().toLowerCase() === normalizedName)) {
+      setError("이미 같은 이름의 참가자가 있습니다.");
       return;
     }
 
@@ -252,11 +263,16 @@ export default function HostEventPage() {
       },
     ];
 
-    const nextEvent = await saveParticipants(event.id, nextParticipants);
-    setEvent(nextEvent);
-    setNewPlayerName("");
-    setNewPlayerGender("male");
+    try {
+      const nextEvent = await saveParticipants(event.id, nextParticipants);
+      setEvent(nextEvent);
+      setError(null);
+      setNewPlayerName("");
+      setNewPlayerGender("male");
       setNewPlayerSkill("medium");
+    } catch (addError) {
+      setError(addError instanceof Error ? addError.message : "참가자 추가에 실패했습니다.");
+    }
   }
 
   async function handleInviteMembers(userIds: string[]): Promise<void> {
@@ -288,6 +304,12 @@ export default function HostEventPage() {
       return;
     }
 
+    const alreadyLinked = event.participants.some((participant) => participant.userId === member.id);
+    if (alreadyLinked) {
+      setError("이미 추가된 회원입니다.");
+      return;
+    }
+
     const nextParticipants: Participant[] = [
       ...event.participants,
       {
@@ -307,9 +329,14 @@ export default function HostEventPage() {
       },
     ];
 
-    const nextEvent = await saveParticipants(event.id, nextParticipants);
-    setEvent(nextEvent);
-    setSelectedMemberId("");
+    try {
+      const nextEvent = await saveParticipants(event.id, nextParticipants);
+      setEvent(nextEvent);
+      setError(null);
+      setSelectedMemberId("");
+    } catch (memberError) {
+      setError(memberError instanceof Error ? memberError.message : "회원 추가에 실패했습니다.");
+    }
   }
 
   async function handleGenerateSchedule(): Promise<void> {
@@ -332,9 +359,77 @@ export default function HostEventPage() {
       const nextEvent = await generateEventSchedule(event.id);
       setError(null);
       setEvent(nextEvent);
-      setRoundActionInfo("Match generation completed successfully.");
+      setRoundActionInfo("대진 생성이 완료되었습니다.");
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : "대진 생성에 실패했습니다.");
+    }
+  }
+
+  function getRoundPlayerPool(roundNumber: number): Array<{ id: string; name: string }> {
+    const round = event?.rounds.find((item) => item.roundNumber === roundNumber);
+    if (!round) {
+      return [];
+    }
+
+    const map = new Map<string, { id: string; name: string }>();
+    for (const player of [...round.restPlayers, ...round.matches.flatMap((match) => [...match.teamA, ...match.teamB])]) {
+      if (player?.id) {
+        map.set(player.id, { id: player.id, name: player.name });
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  function startMatchDirectEdit(roundNumber: number, matchId: string, playerIds: string[]): void {
+    setMatchEditDrafts((current) => ({
+      ...current,
+      [`${roundNumber}:${matchId}`]: playerIds,
+    }));
+  }
+
+  function cancelMatchDirectEdit(roundNumber: number, matchId: string): void {
+    setMatchEditDrafts((current) => {
+      const next = { ...current };
+      delete next[`${roundNumber}:${matchId}`];
+      return next;
+    });
+  }
+
+  function updateMatchDraftValue(roundNumber: number, matchId: string, slotIndex: number, participantId: string): void {
+    setMatchEditDrafts((current) => {
+      const key = `${roundNumber}:${matchId}`;
+      const nextDraft = [...(current[key] ?? [])];
+      nextDraft[slotIndex] = participantId;
+      return {
+        ...current,
+        [key]: nextDraft,
+      };
+    });
+  }
+
+  async function handleSaveDirectMatchEdit(roundNumber: number, matchId: string): Promise<void> {
+    if (!event || !profile) {
+      return;
+    }
+
+    const key = `${roundNumber}:${matchId}`;
+    const participantIds = matchEditDrafts[key] ?? [];
+    if (!window.confirm("선수 직접 편집 내용을 반영하시겠습니까? 현재 경기의 점수와 확인 상태는 초기화됩니다.")) {
+      return;
+    }
+    const reason = window.prompt("선수 직접 편집 사유를 입력하세요. (선택)");
+    try {
+      const nextEvent = await updateRoundMatchAssignment(event.id, roundNumber, matchId, participantIds, {
+        actorUserId: profile.id,
+        actorName: profile.displayName,
+        reason,
+      });
+      setEvent(nextEvent);
+      setRoundActionInfo("경기 선수가 직접 수정되었습니다.");
+      cancelMatchDirectEdit(roundNumber, matchId);
+      setError(null);
+    } catch (directEditError) {
+      setError(directEditError instanceof Error ? directEditError.message : "경기 직접 편집에 실패했습니다.");
     }
   }
 
@@ -634,7 +729,7 @@ export default function HostEventPage() {
                 <button
                   type="button"
                   onClick={() => handleRemoveParticipant(participant.id)}
-                  disabled={!participantsEditable}
+                  disabled={!participantsEditable || participant.role === "host"}
                   className="border-b border-red-200 py-3 text-sm font-semibold text-red-700"
                 >
                   삭제
@@ -906,11 +1001,81 @@ export default function HostEventPage() {
               <div className="grid gap-4">
                 {round.matches.map((match) => (
                   <div key={match.id ?? `${round.roundNumber}-${match.court}`} className="border-t border-line py-4">
+                    {(() => {
+                      const draftKey = `${round.roundNumber}:${match.id ?? ""}`;
+                      const playerIds = [...match.teamA, ...match.teamB].map((player) => player.id);
+                      const pool = getRoundPlayerPool(round.roundNumber);
+                      const draft = matchEditDrafts[draftKey] ?? [];
+                      const slotCount = event.matchType === "singles" ? 2 : 4;
+                      return (
+                        <>
                     <p className="poster-label">Court {match.court}</p>
                     <div className="mt-3 grid gap-2 text-sm">
                       <div><span className="mr-3 inline-block w-4 font-bold text-accentStrong">A</span>A팀: {match.teamA.map((player) => player.name).join(" / ")}</div>
                       <div><span className="mr-3 inline-block w-4 font-bold text-ink/75">B</span>B팀: {match.teamB.map((player) => player.name).join(" / ")}</div>
                     </div>
+                    {!round.completed ? (
+                      <div className="mt-4 border-t border-dashed border-line pt-4">
+                        <div className="mb-2 text-xs font-semibold text-ink/60">호스트 직접 편집</div>
+                        {draft.length > 0 ? (
+                          <div className="space-y-3">
+                            <div className={`grid gap-3 ${event.matchType === "singles" ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-4"}`}>
+                              {Array.from({ length: slotCount }).map((_, slotIndex) => {
+                                const label =
+                                  event.matchType === "singles"
+                                    ? slotIndex === 0
+                                      ? "A팀 선수"
+                                      : "B팀 선수"
+                                    : slotIndex < 2
+                                      ? `A팀 선수 ${slotIndex + 1}`
+                                      : `B팀 선수 ${slotIndex - 1}`;
+                                return (
+                                  <label key={`${draftKey}-${slotIndex}`} className="grid gap-2 text-xs font-semibold">
+                                    {label}
+                                    <select
+                                      value={draft[slotIndex] ?? ""}
+                                      onChange={(event) => updateMatchDraftValue(round.roundNumber, match.id ?? "", slotIndex, event.target.value)}
+                                      className="poster-input"
+                                    >
+                                      <option value="">선수 선택</option>
+                                      {pool.map((player) => (
+                                        <option key={`${draftKey}-${player.id}`} value={player.id}>
+                                          {player.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleSaveDirectMatchEdit(round.roundNumber, match.id ?? "")}
+                                className="poster-button-secondary"
+                              >
+                                직접 편집 저장
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => cancelMatchDirectEdit(round.roundNumber, match.id ?? "")}
+                                className="border border-line px-3 py-2 text-xs font-semibold"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => startMatchDirectEdit(round.roundNumber, match.id ?? "", playerIds)}
+                            className="border border-line px-3 py-2 text-xs font-semibold"
+                          >
+                            선수 직접 편집
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm font-semibold">
                         A팀 점수
@@ -1015,6 +1180,9 @@ export default function HostEventPage() {
                         <span className="text-xs font-bold uppercase tracking-[0.18em] text-amber-800">타이</span>
                       </div>
                     ) : null}
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

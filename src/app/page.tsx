@@ -121,7 +121,7 @@ export default function HomePage() {
 
     const interval = window.setInterval(() => {
       void loadUserInvitations(profile.id).then(setInvitations);
-    }, 2500);
+    }, 1000);
 
     return () => {
       window.clearInterval(interval);

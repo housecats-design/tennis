@@ -2,7 +2,6 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { loadEvent, subscribeToEvent } from "@/lib/events";
-import { loadLastRole } from "@/lib/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -23,8 +22,7 @@ export default function HostRoundsPage() {
     const refresh = async () => {
       try {
         const [profile, nextEvent] = await Promise.all([getCurrentProfile(), loadEvent(eventId)]);
-        const lastRole = loadLastRole();
-        if (!profile || lastRole === "player" || (nextEvent && nextEvent.hostUserId !== profile.id)) {
+        if (!profile || (nextEvent && nextEvent.hostUserId !== profile.id)) {
           router.replace(nextEvent ? `/guest/event/${nextEvent.id}` : "/");
           return;
         }

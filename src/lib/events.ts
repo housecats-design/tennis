@@ -11,6 +11,7 @@ import {
   AuditLog,
   EventRecord,
   Invitation,
+  Match,
   Notification,
   Participant,
   ParticipantGender,
@@ -442,6 +443,71 @@ function buildPlayers(participants: Participant[]): Player[] {
   }));
 }
 
+function uniquePlayers(players: Player[]): Player[] {
+  const map = new Map<string, Player>();
+  for (const player of players) {
+    if (player?.id) {
+      map.set(player.id, player);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function buildMatchFromPlayerIds(
+  matchType: EventRecord["matchType"],
+  court: number,
+  playerIds: string[],
+  playerMap: Map<string, Player>,
+): Match {
+  const selectedPlayers = playerIds.map((id) => playerMap.get(id)).filter(Boolean) as Player[];
+  if (matchType === "singles") {
+    return {
+      court,
+      teamA: selectedPlayers.slice(0, 1),
+      teamB: selectedPlayers.slice(1, 2),
+      scoreA: null,
+      scoreB: null,
+      isTieBreak: false,
+      skipped: false,
+      completed: false,
+      scoreProposal: null,
+    };
+  }
+
+  return {
+    court,
+    teamA: selectedPlayers.slice(0, 2),
+    teamB: selectedPlayers.slice(2, 4),
+    scoreA: null,
+    scoreB: null,
+    isTieBreak: false,
+    skipped: false,
+    completed: false,
+    scoreProposal: null,
+  };
+}
+
+function validateParticipants(participants: Participant[]): void {
+  const normalizedNames = participants.map((participant) => participant.displayName.trim().toLowerCase());
+  if (normalizedNames.some((name) => !name)) {
+    throw new Error("참가자 이름은 비어 있을 수 없습니다.");
+  }
+
+  if (new Set(normalizedNames).size !== normalizedNames.length) {
+    throw new Error("이미 같은 이름의 참가자가 있습니다.");
+  }
+
+  const userIds = participants.map((participant) => participant.userId).filter(Boolean) as string[];
+  if (new Set(userIds).size !== userIds.length) {
+    throw new Error("이미 추가된 회원입니다.");
+  }
+
+  const participantIds = participants.map((participant) => participant.id).filter(Boolean);
+  if (new Set(participantIds).size !== participantIds.length) {
+    throw new Error("중복된 참가자 정보가 있습니다.");
+  }
+}
+
 function withMatchIds(rounds: Round[]): Round[] {
   return rounds.map((round) => ({
     ...round,
@@ -817,6 +883,8 @@ export async function joinEvent(
 }
 
 export async function saveParticipants(eventId: string, participants: Participant[]): Promise<EventRecord | null> {
+  validateParticipants(participants);
+
   const normalizedParticipants = participants.map((participant) => ({
     ...participant,
     guestNtrp: participant.guestNtrp ?? null,
@@ -1598,6 +1666,118 @@ export async function reassignSingleMatch(
       ),
     }),
   );
+}
+
+export async function updateRoundMatchAssignment(
+  eventId: string,
+  roundNumber: number,
+  matchId: string,
+  participantIds: string[],
+  audit?: { actorUserId: string; actorName: string; reason?: string | null },
+): Promise<EventRecord | null> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return null;
+  }
+
+  const targetRound = safeArray(event.rounds).find((round) => round.roundNumber === roundNumber);
+  const targetMatch = safeArray(targetRound?.matches).find((match) => match.id === matchId);
+  if (!targetRound || !targetMatch || targetRound.completed) {
+    return event;
+  }
+
+  const playersPerMatch = event.matchType === "singles" ? 2 : 4;
+  const selectedIds = participantIds.filter(Boolean);
+  if (selectedIds.length !== playersPerMatch || new Set(selectedIds).size !== playersPerMatch) {
+    throw new Error("한 경기의 선수 수가 올바르지 않거나 중복된 선수가 선택되었습니다.");
+  }
+
+  const roundPool = uniquePlayers([
+    ...safeArray(targetRound.restPlayers),
+    ...safeArray(targetRound.matches).flatMap((match) => [...safeArray(match.teamA), ...safeArray(match.teamB)]),
+  ]);
+  const roundPoolIds = new Set(roundPool.map((player) => player.id));
+  if (selectedIds.some((id) => !roundPoolIds.has(id))) {
+    throw new Error("현재 라운드에 포함된 선수만 직접 편집할 수 있습니다.");
+  }
+
+  const allPlayers = uniquePlayers(buildPlayers(event.participants));
+  const playerMap = new Map(allPlayers.map((player) => [player.id, player]));
+  const originalTargetIds = [...safeArray(targetMatch.teamA), ...safeArray(targetMatch.teamB)].map((player) => player.id);
+  const takenFromElsewhere = selectedIds.filter((id) => !originalTargetIds.includes(id));
+  const displacedIds = originalTargetIds.filter((id) => !selectedIds.includes(id));
+  const replacementQueue = [...displacedIds];
+
+  return updateEvent(eventId, (currentEvent) => {
+    const currentRound = safeArray(currentEvent.rounds).find((round) => round.roundNumber === roundNumber);
+    if (!currentRound) {
+      return currentEvent;
+    }
+
+    const nextMatches = currentRound.matches.map((match) => {
+      const currentIds = [...safeArray(match.teamA), ...safeArray(match.teamB)].map((player) => player.id);
+      const nextIds =
+        match.id === matchId
+          ? selectedIds
+          : currentIds.map((id) => {
+              if (!takenFromElsewhere.includes(id)) {
+                return id;
+              }
+              return replacementQueue.shift() ?? id;
+            });
+
+      const changed =
+        match.id === matchId ||
+        nextIds.some((id, index) => id !== currentIds[index]);
+
+      if (!changed) {
+        return match;
+      }
+
+      const rebuilt = buildMatchFromPlayerIds(currentEvent.matchType, match.court, nextIds, playerMap);
+      return {
+        ...rebuilt,
+        id: match.id,
+      };
+    });
+
+    const assignedIds = new Set(nextMatches.flatMap((match) => [...match.teamA, ...match.teamB].map((player) => player.id)));
+    const nextRestPlayers = roundPool.filter((player) => !assignedIds.has(player.id));
+    const nextRound = {
+      ...currentRound,
+      state: currentRoundState({
+        ...currentRound,
+        restPlayers: nextRestPlayers,
+        matches: nextMatches,
+      }),
+      restPlayers: nextRestPlayers,
+      matches: nextMatches,
+    };
+
+    return withDerivedEventState({
+      ...currentEvent,
+      auditLogs: audit
+        ? appendAuditLog(currentEvent, {
+            eventId,
+            actorUserId: audit.actorUserId,
+            actorName: audit.actorName,
+            action: "match_assignment_updated",
+            reason: audit.reason ?? null,
+          })
+        : currentEvent.auditLogs ?? [],
+      notifications: [
+        ...currentEvent.notifications,
+        createEventNotification({
+          eventId,
+          roundNumber,
+          message: "호스트가 경기 선수를 직접 수정했습니다. 점수와 확인 상태가 초기화되었습니다.",
+          type: "warning",
+          metadata: { matchId },
+        }),
+      ],
+      rounds: currentEvent.rounds.map((round) => (round.roundNumber === roundNumber ? nextRound : round)),
+    });
+  });
 }
 
 export function subscribeToEvent(eventId: string, callback: () => void): (() => void) {
