@@ -72,6 +72,17 @@ type ClubJoinRequestRow = {
   reviewed_at?: string | null;
 };
 
+function shouldFallbackToLocal(error: { message?: string | null } | null | undefined): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    message.includes("schema cache") ||
+    message.includes("does not exist") ||
+    message.includes("could not find the table") ||
+    message.includes("relation") ||
+    message.includes("column")
+  );
+}
+
 function canUseStorage(): boolean {
   return typeof window !== "undefined";
 }
@@ -267,6 +278,9 @@ export async function listClubMembers(clubId: string): Promise<ClubMember[]> {
     .order("joined_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedMembers().filter((member) => member.clubId === clubId && member.deletedAt == null);
+    }
     return loadCachedMembers().filter((member) => member.clubId === clubId && member.deletedAt == null);
   }
 
@@ -314,6 +328,9 @@ export async function listPendingClubJoinRequests(clubId: string): Promise<ClubJ
     .order("requested_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedJoinRequests().filter((request) => request.clubId === clubId && request.status === "pending");
+    }
     return loadCachedJoinRequests().filter((request) => request.clubId === clubId && request.status === "pending");
   }
 
@@ -375,7 +392,13 @@ export async function updateClubJoinRequestStatus(input: {
       .eq("id", input.requestId);
 
     if (requestError) {
-      throw new Error(requestError.message);
+      if (shouldFallbackToLocal(requestError)) {
+        cacheJoinRequests(
+          loadCachedJoinRequests().map((request) => (request.id === input.requestId ? nextRequest : request)),
+        );
+      } else {
+        throw new Error(requestError.message);
+      }
     }
 
     if (input.status === "approved") {
@@ -408,7 +431,12 @@ export async function updateClubJoinRequestStatus(input: {
       );
 
       if (membershipError) {
-        throw new Error(membershipError.message);
+        if (shouldFallbackToLocal(membershipError)) {
+          const existingMemberships = loadCachedMembers().filter((member) => !(member.clubId === input.clubId && member.userId === targetRequest.userId));
+          cacheMembers([...existingMemberships, nextMembership]);
+        } else {
+          throw new Error(membershipError.message);
+        }
       }
     }
   } else {
@@ -465,7 +493,17 @@ export async function updateClubMemberRole(input: {
       .eq("user_id", input.targetUserId);
 
     if (error) {
-      throw new Error(error.message);
+      if (shouldFallbackToLocal(error)) {
+        cacheMembers(
+          loadCachedMembers().map((member) =>
+            member.clubId === input.clubId && member.userId === input.targetUserId
+              ? nextMembership
+              : member,
+          ),
+        );
+      } else {
+        throw new Error(error.message);
+      }
     }
   } else {
     cacheMembers(
@@ -494,6 +532,9 @@ export async function listActiveClubs(): Promise<Club[]> {
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedClubs().filter((club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending");
+    }
     return loadCachedClubs().filter((club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending");
   }
 
@@ -544,6 +585,9 @@ export async function listMyClubMemberships(userId: string): Promise<ClubMember[
     .order("joined_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedMembers().filter((member) => member.userId === userId && member.deletedAt == null);
+    }
     return loadCachedMembers().filter((member) => member.userId === userId && member.deletedAt == null);
   }
 
@@ -583,6 +627,9 @@ export async function listMyClubApplications(userId: string): Promise<ClubApplic
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedApplications().filter((application) => application.applicantUserId === userId);
+    }
     return loadCachedApplications().filter((application) => application.applicantUserId === userId);
   }
 
@@ -602,6 +649,174 @@ export async function listMyClubApplications(userId: string): Promise<ClubApplic
   );
   cacheApplications(applications);
   return applications;
+}
+
+export async function listAllClubApplications(): Promise<ClubApplication[]> {
+  if (!isSupabaseEnabled()) {
+    return loadCachedApplications().sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase!
+    .from("club_applications")
+    .select("id, applicant_user_id, club_name, region, description, status, reviewed_by, reviewed_at, rejection_reason, created_at")
+    .order("created_at", { ascending: false });
+
+  if (error || !Array.isArray(data)) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedApplications().sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    }
+    return loadCachedApplications().sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }
+
+  const applications = data.map((row) =>
+    normalizeClubApplication({
+      id: (row as ClubApplicationRow).id,
+      applicantUserId: (row as ClubApplicationRow).applicant_user_id,
+      clubName: (row as ClubApplicationRow).club_name,
+      region: (row as ClubApplicationRow).region,
+      description: (row as ClubApplicationRow).description ?? null,
+      status: normalizeApplicationStatus((row as ClubApplicationRow).status),
+      reviewedBy: (row as ClubApplicationRow).reviewed_by ?? null,
+      reviewedAt: (row as ClubApplicationRow).reviewed_at ?? null,
+      rejectionReason: (row as ClubApplicationRow).rejection_reason ?? null,
+      createdAt: (row as ClubApplicationRow).created_at ?? new Date().toISOString(),
+    }),
+  );
+  cacheApplications(applications);
+  return applications;
+}
+
+export async function reviewClubApplication(input: {
+  applicationId: string;
+  reviewerUserId: string;
+  status: "approved" | "rejected";
+  rejectionReason?: string | null;
+}): Promise<{ application: ClubApplication; createdClub: Club | null }> {
+  const applications = await listAllClubApplications();
+  const target = applications.find((application) => application.id === input.applicationId);
+  if (!target) {
+    throw new Error("클럽 신청을 찾을 수 없습니다.");
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const nextApplication = normalizeClubApplication({
+    ...target,
+    status: input.status,
+    reviewedBy: input.reviewerUserId,
+    reviewedAt,
+    rejectionReason: input.status === "rejected" ? input.rejectionReason ?? null : null,
+  });
+
+  let createdClub: Club | null = null;
+
+  if (input.status === "approved") {
+    createdClub = normalizeClub({
+      id: `club_${crypto.randomUUID().slice(0, 8)}`,
+      clubName: target.clubName,
+      region: target.region,
+      description: target.description ?? null,
+      createdByUserId: target.applicantUserId,
+      status: "approved",
+      approvedBy: input.reviewerUserId,
+      approvedAt: reviewedAt,
+      isActive: true,
+    });
+  }
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const { error: updateError } = await supabase!
+      .from("club_applications")
+      .update({
+        status: nextApplication.status,
+        reviewed_by: nextApplication.reviewedBy ?? null,
+        reviewed_at: nextApplication.reviewedAt ?? null,
+        rejection_reason: nextApplication.rejectionReason ?? null,
+      })
+      .eq("id", input.applicationId);
+
+    if (updateError) {
+      if (!shouldFallbackToLocal(updateError)) {
+        throw new Error(updateError.message);
+      }
+    }
+
+    if (createdClub) {
+      const { error: insertClubError } = await supabase!.from("clubs").insert({
+        id: createdClub.id,
+        club_name: createdClub.clubName,
+        region: createdClub.region ?? null,
+        description: createdClub.description ?? null,
+        created_by_user_id: createdClub.createdByUserId,
+        status: createdClub.status ?? "approved",
+        approved_by: createdClub.approvedBy ?? null,
+        approved_at: createdClub.approvedAt ?? null,
+        is_active: true,
+        deleted_at: null,
+        created_at: createdClub.createdAt,
+        updated_at: createdClub.updatedAt,
+      });
+
+      if (insertClubError) {
+        if (!shouldFallbackToLocal(insertClubError)) {
+          throw new Error(insertClubError.message);
+        }
+      } else {
+        const leaderMembership = normalizeClubMember({
+          id: makeId("club_member"),
+          clubId: createdClub.id,
+          userId: target.applicantUserId,
+          role: "leader",
+          membershipStatus: "approved",
+          approvedBy: input.reviewerUserId,
+          approvedAt: reviewedAt,
+        });
+        await supabase!.from("club_members").upsert(
+          {
+            id: leaderMembership.id,
+            club_id: leaderMembership.clubId,
+            user_id: leaderMembership.userId,
+            role: leaderMembership.role,
+            membership_status: leaderMembership.membershipStatus,
+            joined_at: leaderMembership.joinedAt,
+            approved_by: leaderMembership.approvedBy ?? null,
+            approved_at: leaderMembership.approvedAt ?? null,
+            left_at: null,
+            is_active: true,
+            deleted_at: null,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: "club_id,user_id" },
+        );
+      }
+    }
+  }
+
+  const cachedApplications = loadCachedApplications().map((application) =>
+    application.id === input.applicationId ? nextApplication : application,
+  );
+  cacheApplications(cachedApplications);
+
+  if (createdClub) {
+    const currentClubs = loadCachedClubs().filter((club) => club.id !== createdClub.id);
+    cacheClubs([createdClub, ...currentClubs]);
+    const leaderMembership = normalizeClubMember({
+      id: makeId("club_member"),
+      clubId: createdClub.id,
+      userId: target.applicantUserId,
+      role: "leader",
+      membershipStatus: "approved",
+      approvedBy: input.reviewerUserId,
+      approvedAt: reviewedAt,
+    });
+    const currentMembers = loadCachedMembers().filter(
+      (member) => !(member.clubId === createdClub.id && member.userId === target.applicantUserId),
+    );
+    cacheMembers([leaderMembership, ...currentMembers]);
+  }
+
+  return { application: nextApplication, createdClub };
 }
 
 export async function getPendingJoinRequest(clubId: string, userId: string): Promise<ClubJoinRequest | null> {
@@ -625,6 +840,9 @@ export async function getPendingJoinRequest(clubId: string, userId: string): Pro
     .maybeSingle();
 
   if (error || !data) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedJoinRequests().find((request) => request.clubId === clubId && request.userId === userId && (request.status === "pending" || request.status === "approved")) ?? null;
+    }
     return loadCachedJoinRequests().find((request) => request.clubId === clubId && request.userId === userId && (request.status === "pending" || request.status === "approved")) ?? null;
   }
 
@@ -674,7 +892,11 @@ export async function submitClubApplication(input: {
       created_at: normalized.createdAt,
     });
     if (error) {
-      throw new Error(error.message);
+      if (shouldFallbackToLocal(error)) {
+        cacheApplications([normalized, ...loadCachedApplications()]);
+      } else {
+        throw new Error(error.message);
+      }
     }
   } else {
     cacheApplications([normalized, ...loadCachedApplications()]);
@@ -726,7 +948,11 @@ export async function submitClubJoinRequest(input: {
       requested_at: nextRequest.requestedAt,
     });
     if (error) {
-      throw new Error(error.message);
+      if (shouldFallbackToLocal(error)) {
+        cacheJoinRequests([nextRequest, ...loadCachedJoinRequests()]);
+      } else {
+        throw new Error(error.message);
+      }
     }
   } else {
     cacheJoinRequests([nextRequest, ...loadCachedJoinRequests()]);
