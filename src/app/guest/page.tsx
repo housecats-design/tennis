@@ -77,6 +77,11 @@ export default function GuestPage() {
             return;
           }
 
+          if (profile.gender === "unspecified") {
+            setError("먼저 프로필 설정에서 성별을 입력해 주세요.");
+            return;
+          }
+
           const invitation = getInvitationById(targetEvent, inviteId);
           if (!invitation) {
             setError("만료되었거나 유효하지 않은 초대 링크입니다.");
@@ -85,7 +90,7 @@ export default function GuestPage() {
 
           const participant = await joinEvent(targetEvent.id, {
             displayName: profile.displayName,
-            gender: profile.gender === "female" ? "female" : "male",
+            gender: profile.gender,
             guestNtrp: profile.defaultNtrp ?? null,
             userId: profile.id,
             inviteId,

@@ -286,9 +286,15 @@ export default function HomePage() {
         return;
       }
 
+      if (profile.gender === "unspecified") {
+        setError("초대를 수락하려면 먼저 프로필 설정에서 성별을 입력해 주세요.");
+        router.push("/profile");
+        return;
+      }
+
       const participant = await joinEvent(invitation.eventId, {
         displayName: profile.displayName,
-        gender: profile.gender === "female" ? "female" : "male",
+        gender: profile.gender,
         guestNtrp: profile.defaultNtrp ?? null,
         userId: profile.id,
         inviteId: invitation.id,
