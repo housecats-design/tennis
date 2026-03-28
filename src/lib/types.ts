@@ -1,8 +1,8 @@
 export type MatchType = "singles" | "doubles";
 export type RoundViewMode = "progressive" | "full";
-export type EventStatus = "waiting" | "in_progress" | "completed";
+export type EventStatus = "draft" | "waiting" | "recruiting" | "in_progress" | "completed" | "finished" | "archived";
 export type ParticipantRole = "host" | "guest";
-export type ParticipantGender = "male" | "female" | "unspecified";
+export type ParticipantGender = "male" | "female" | "other" | "unspecified";
 export type SkillLevel = "high" | "medium" | "low";
 export type ScoreProposalStatus = "pending" | "accepted" | "disputed";
 export type AppRole = "host" | "player";
@@ -11,6 +11,10 @@ export type UserRole = "member" | "admin";
 export type ClubRole = "owner" | "manager" | "member";
 export type ParticipantSource = "host" | "joined" | "member" | "manual";
 export type RoundCloseReason = "completed" | "force_closed" | "skipped";
+export type RoundState = "waiting" | "assigned" | "playing" | "score_pending" | "disputed" | "completed";
+export type ParticipantAvailabilityState = "active" | "unavailable" | "injured" | "left_early";
+export type InvitationState = "pending" | "accepted" | "declined" | "expired";
+export type NotificationType = "info" | "success" | "warning" | "invitation" | "dispute" | "approval" | "system";
 
 export type Player = {
   id: string;
@@ -28,6 +32,11 @@ export type ScoreProposal = {
   submittedAt: string;
   acceptedByParticipantIds: string[];
   disputedByParticipantIds: string[];
+  comments?: Array<{
+    participantId: string;
+    reason?: string | null;
+    createdAt: string;
+  }>;
   status: ScoreProposalStatus;
 };
 
@@ -52,6 +61,7 @@ export type Round = {
   completed?: boolean;
   forceClosed?: boolean;
   closeReason?: RoundCloseReason | null;
+  state?: RoundState;
 };
 
 export type PlayerStats = {
@@ -109,6 +119,7 @@ export type Participant = {
   source?: ParticipantSource;
   joinedAt?: string;
   isActive?: boolean;
+  availabilityState?: ParticipantAvailabilityState;
 };
 
 export type Notification = {
@@ -117,8 +128,42 @@ export type Notification = {
   roundNumber: number;
   message: string;
   targetParticipantId?: string | null;
+  targetUserId?: string | null;
   readAt?: string | null;
   createdAt?: string | null;
+  type?: NotificationType;
+  actionUrl?: string | null;
+  metadata?: Record<string, string | number | boolean | null> | null;
+};
+
+export type Invitation = {
+  id: string;
+  eventId: string;
+  eventName: string;
+  code: string;
+  invitedUserId: string;
+  invitedEmail?: string | null;
+  invitedDisplayName: string;
+  invitedByUserId: string;
+  invitedByName: string;
+  status: InvitationState;
+  createdAt: string;
+  respondedAt?: string | null;
+  expiresAt?: string | null;
+  actionUrl: string;
+};
+
+export type AuditLog = {
+  id: string;
+  eventId?: string | null;
+  actorUserId: string;
+  actorName: string;
+  targetUserId?: string | null;
+  action: string;
+  reason?: string | null;
+  previousValue?: string | null;
+  nextValue?: string | null;
+  createdAt: string;
 };
 
 export type EventRecord = {
@@ -135,6 +180,8 @@ export type EventRecord = {
   rounds: Round[];
   stats: Record<string, PlayerStats>;
   notifications: Notification[];
+  invitations?: Invitation[];
+  auditLogs?: AuditLog[];
   createdAt: string;
   updatedAt: string;
   isSaved?: boolean;
@@ -163,6 +210,8 @@ export type UserProfile = {
   realName: string;
   nickname: string;
   displayName: string;
+  gender: ParticipantGender;
+  genderLockedAt?: string | null;
   isAdmin: boolean;
   memo: string;
   isDeleted: boolean;

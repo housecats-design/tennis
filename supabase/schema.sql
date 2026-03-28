@@ -23,12 +23,37 @@ create table if not exists user_profiles (
   real_name text default '',
   nickname text default '',
   display_name text not null,
+  gender text default 'unspecified',
+  gender_locked_at timestamptz,
   is_admin boolean default false,
   memo text default '',
   is_deleted boolean default false,
   deleted_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
+);
+
+create table if not exists admin_audit_logs (
+  id text primary key,
+  admin_user_id text not null,
+  target_user_id text,
+  action text not null,
+  previous_value text,
+  next_value text,
+  created_at timestamptz default now()
+);
+
+create table if not exists user_notifications (
+  id text primary key,
+  user_id text not null,
+  event_id text,
+  type text not null default 'info',
+  title text not null,
+  message text not null,
+  action_url text,
+  metadata jsonb not null default '{}'::jsonb,
+  read_at timestamptz,
+  created_at timestamptz default now()
 );
 
 create table if not exists clubs (

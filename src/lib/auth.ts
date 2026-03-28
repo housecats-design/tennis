@@ -130,14 +130,15 @@ export async function signUpAccount(input: {
   confirmPassword: string;
   realName: string;
   nickname: string;
+  gender: "male" | "female" | "other";
 }): Promise<UserProfile> {
   const loginId = input.loginId.trim().toLowerCase();
   const email = input.email.trim().toLowerCase();
   const realName = input.realName.trim();
   const nickname = input.nickname.trim();
 
-  if (!loginId || !email || !realName || !nickname || !input.password) {
-    throw new Error("이름, 별명, 아이디, 이메일, 비밀번호를 모두 입력해 주세요.");
+  if (!loginId || !email || !realName || !nickname || !input.password || !input.gender) {
+    throw new Error("이름, 별명, 아이디, 이메일, 성별, 비밀번호를 모두 입력해 주세요.");
   }
 
   if (input.password !== input.confirmPassword) {
@@ -174,6 +175,7 @@ export async function signUpAccount(input: {
       displayName: `${realName}(${nickname})`,
       realName,
       nickname,
+      gender: input.gender,
     });
   } catch (profileError) {
     const message = profileError instanceof Error ? profileError.message : "";

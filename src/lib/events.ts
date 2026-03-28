@@ -8,17 +8,21 @@ import {
   saveEvents as saveCachedEvents,
 } from "@/lib/storage";
 import {
+  AuditLog,
   EventRecord,
+  Invitation,
   Notification,
   Participant,
   ParticipantGender,
+  ParticipantAvailabilityState,
   Player,
   Round,
+  RoundState,
   RoundViewMode,
   SkillLevel,
 } from "@/lib/types";
 import { accumulateRoundStats, createStatsRecord } from "@/lib/stats";
-import { getGuestNotifications, markNotificationRead, notifyRoundCompletion } from "@/lib/notifications";
+import { createEventNotification, createInvitationNotification, getGuestNotifications, markNotificationRead, notifyRoundCompletion } from "@/lib/notifications";
 import { generateScheduleSchema } from "@/lib/validator";
 import { calculateExpectedParticipation, calculateLeaderboard } from "@/lib/leaderboard";
 
@@ -62,6 +66,7 @@ function normalizeParticipants(participants: EventRecord["participants"] | null 
     userId: participant?.userId ?? null,
     joinedAt: participant?.joinedAt ?? undefined,
     isActive: participant?.isActive ?? true,
+    availabilityState: (participant?.availabilityState ?? "active") as ParticipantAvailabilityState,
   }));
 }
 
@@ -71,8 +76,46 @@ function normalizeNotifications(notifications: Notification[] | null | undefined
     message: notification?.message ?? "",
     roundNumber: notification?.roundNumber ?? 0,
     targetParticipantId: notification?.targetParticipantId ?? null,
+    targetUserId: notification?.targetUserId ?? null,
     readAt: notification?.readAt ?? null,
     createdAt: notification?.createdAt ?? null,
+    type: notification?.type ?? "info",
+    actionUrl: notification?.actionUrl ?? null,
+    metadata: notification?.metadata ?? null,
+  }));
+}
+
+function normalizeInvitations(invitations: Invitation[] | null | undefined, eventId: string, eventName: string, code: string): Invitation[] {
+  return safeArray(invitations).filter(Boolean).map((invitation) => ({
+    id: invitation.id,
+    eventId: invitation.eventId ?? eventId,
+    eventName: invitation.eventName ?? eventName,
+    code: invitation.code ?? code,
+    invitedUserId: invitation.invitedUserId,
+    invitedEmail: invitation.invitedEmail ?? null,
+    invitedDisplayName: invitation.invitedDisplayName ?? "",
+    invitedByUserId: invitation.invitedByUserId,
+    invitedByName: invitation.invitedByName,
+    status: invitation.status ?? "pending",
+    createdAt: invitation.createdAt ?? new Date().toISOString(),
+    respondedAt: invitation.respondedAt ?? null,
+    expiresAt: invitation.expiresAt ?? null,
+    actionUrl: invitation.actionUrl ?? `/guest?eventId=${eventId}&invite=${invitation.id}`,
+  }));
+}
+
+function normalizeAuditLogs(auditLogs: AuditLog[] | null | undefined): AuditLog[] {
+  return safeArray(auditLogs).filter(Boolean).map((log) => ({
+    id: log.id,
+    eventId: log.eventId ?? null,
+    actorUserId: log.actorUserId,
+    actorName: log.actorName,
+    targetUserId: log.targetUserId ?? null,
+    action: log.action,
+    reason: log.reason ?? null,
+    previousValue: log.previousValue ?? null,
+    nextValue: log.nextValue ?? null,
+    createdAt: log.createdAt ?? new Date().toISOString(),
   }));
 }
 
@@ -84,6 +127,7 @@ function normalizeRounds(rounds: EventRecord["rounds"] | null | undefined): Even
     completed: Boolean(round?.completed),
     forceClosed: Boolean(round?.forceClosed),
     closeReason: round?.closeReason ?? null,
+    state: (round?.state ?? (round?.completed ? "completed" : "waiting")) as RoundState,
     restPlayers: safeArray(round?.restPlayers).filter(Boolean),
     matches: safeArray(round?.matches).filter(Boolean).map((match, matchIndex) => ({
       ...match,
@@ -145,6 +189,8 @@ function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "i
   const participants = normalizeParticipants(event.participants);
   const rounds = normalizeRounds(event.rounds);
   const notifications = normalizeNotifications(event.notifications);
+  const invitations = normalizeInvitations(event.invitations, event.id, event.eventName ?? "", event.code ?? "");
+  const auditLogs = normalizeAuditLogs(event.auditLogs);
 
   return {
     id: event.id,
@@ -155,11 +201,13 @@ function normalizeEventRecord(event: Partial<EventRecord> & Pick<EventRecord, "i
     courtCount: typeof event.courtCount === "number" ? event.courtCount : 1,
     roundCount: typeof event.roundCount === "number" ? event.roundCount : 1,
     roundViewMode: event.roundViewMode ?? "progressive",
-    status: event.status ?? "waiting",
+    status: (event.status ?? "waiting") as EventRecord["status"],
     participants,
     rounds,
     stats: normalizeStats(event.stats, participants),
     notifications,
+    invitations,
+    auditLogs,
     createdAt: event.createdAt ?? new Date().toISOString(),
     updatedAt: event.updatedAt ?? new Date().toISOString(),
     isSaved: Boolean(event.isSaved),
@@ -207,7 +255,7 @@ function hydrateEvent(row: EventRow): EventRecord {
   try {
     const state = row.state;
     if (state) {
-      const hydrated = normalizeEventRecord({
+    const hydrated = normalizeEventRecord({
         ...state,
         id: state.id ?? row.id,
         code: state.code ?? row.code ?? "",
@@ -217,7 +265,7 @@ function hydrateEvent(row: EventRow): EventRecord {
         courtCount: state.courtCount ?? row.court_count,
         roundCount: state.roundCount ?? row.round_count,
         roundViewMode: state.roundViewMode ?? row.round_view_mode,
-        status: state.status ?? row.status,
+        status: toActiveEventStatus((state.status ?? row.status) as EventRecord["status"]),
         isSaved: state.isSaved ?? row.is_saved ?? false,
         savedAt: state.savedAt ?? row.saved_at ?? null,
         savedByUserId: state.savedByUserId ?? row.saved_by_user_id ?? null,
@@ -237,7 +285,7 @@ function hydrateEvent(row: EventRow): EventRecord {
       courtCount: row.court_count,
       roundCount: row.round_count,
       roundViewMode: row.round_view_mode,
-      status: row.status,
+      status: toActiveEventStatus(row.status as EventRecord["status"]),
       participants: [],
       rounds: [],
       stats: {},
@@ -261,7 +309,7 @@ function hydrateEvent(row: EventRow): EventRecord {
       courtCount: row.court_count,
       roundCount: row.round_count,
       roundViewMode: row.round_view_mode,
-      status: row.status,
+      status: toActiveEventStatus(row.status as EventRecord["status"]),
       participants: [],
       rounds: [],
       stats: {},
@@ -411,6 +459,38 @@ function withDerivedEventState(event: EventRecord): EventRecord {
   };
 }
 
+function toActiveEventStatus(status: EventRecord["status"]): EventRecord["status"] {
+  if (status === "finished" || status === "completed") {
+    return "finished";
+  }
+
+  if (status === "draft" || status === "waiting") {
+    return "recruiting";
+  }
+
+  return status;
+}
+
+function currentRoundState(round: Round): RoundState {
+  if (round.completed) {
+    return "completed";
+  }
+
+  if (round.matches.some((match) => match.scoreProposal?.status === "disputed")) {
+    return "disputed";
+  }
+
+  if (round.matches.some((match) => match.scoreProposal)) {
+    return "score_pending";
+  }
+
+  if (round.matches.length > 0) {
+    return "playing";
+  }
+
+  return "waiting";
+}
+
 async function updateEvent(eventId: string, updater: (event: EventRecord) => EventRecord): Promise<EventRecord | null> {
   const currentEvent = await loadEvent(eventId);
   if (!currentEvent) {
@@ -421,6 +501,129 @@ async function updateEvent(eventId: string, updater: (event: EventRecord) => Eve
   await persistEvent(nextEvent);
   emitEventUpdate(nextEvent);
   return nextEvent;
+}
+
+function makeInviteLink(eventId: string, invitationId: string): string {
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const path = `/guest?eventId=${eventId}&invite=${invitationId}`;
+  return base ? `${base}${path}` : path;
+}
+
+function isInvitationExpired(invitation: Invitation): boolean {
+  if (!invitation.expiresAt) {
+    return false;
+  }
+
+  return new Date(invitation.expiresAt).getTime() < Date.now();
+}
+
+function appendAuditLog(event: EventRecord, input: Omit<AuditLog, "id" | "createdAt">): AuditLog[] {
+  return [
+    ...safeArray(event.auditLogs),
+    {
+      id: makeId("audit"),
+      createdAt: new Date().toISOString(),
+      ...input,
+    },
+  ];
+}
+
+export async function createMemberInvitations(
+  eventId: string,
+  input: {
+    invitedUserIds: string[];
+    invitedByUserId: string;
+    invitedByName: string;
+    userDirectory?: Array<{ id: string; email: string; displayName: string }>;
+  },
+): Promise<EventRecord | null> {
+  const uniqueUserIds = Array.from(new Set(input.invitedUserIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) {
+    return loadEvent(eventId);
+  }
+
+  return updateEvent(eventId, (event) => {
+    const nextInvitations = [...safeArray(event.invitations)];
+    const nextNotifications = [...event.notifications];
+    for (const invitedUserId of uniqueUserIds) {
+      const alreadyJoined = event.participants.some((participant) => participant.userId === invitedUserId);
+      if (alreadyJoined) {
+        continue;
+      }
+
+      const existingPending = nextInvitations.find(
+        (invitation) => invitation.invitedUserId === invitedUserId && invitation.status === "pending" && !isInvitationExpired(invitation),
+      );
+      if (existingPending) {
+        continue;
+      }
+
+      const invitedUser = input.userDirectory?.find((user) => user.id === invitedUserId);
+      const invitationId = makeId("invite");
+      const invitation: Invitation = {
+        id: invitationId,
+        eventId: event.id,
+        eventName: event.eventName,
+        code: event.code,
+        invitedUserId,
+        invitedEmail: invitedUser?.email ?? null,
+        invitedDisplayName: invitedUser?.displayName ?? invitedUser?.email ?? "회원",
+        invitedByUserId: input.invitedByUserId,
+        invitedByName: input.invitedByName,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        respondedAt: null,
+        expiresAt: null,
+        actionUrl: makeInviteLink(event.id, invitationId),
+      };
+      nextInvitations.push(invitation);
+      nextNotifications.push(createInvitationNotification(invitation));
+    }
+
+    return {
+      ...event,
+      invitations: nextInvitations,
+      notifications: nextNotifications,
+    };
+  });
+}
+
+export async function updateInvitationStatus(
+  eventId: string,
+  invitationId: string,
+  status: Invitation["status"],
+): Promise<EventRecord | null> {
+  return updateEvent(eventId, (event) => ({
+    ...event,
+    invitations: safeArray(event.invitations).map((invitation) => {
+      if (invitation.id !== invitationId) {
+        return invitation;
+      }
+
+      return {
+        ...invitation,
+        status: isInvitationExpired(invitation) && status === "pending" ? "expired" : status,
+        respondedAt: status === "pending" ? invitation.respondedAt ?? null : new Date().toISOString(),
+      };
+    }),
+  }));
+}
+
+export async function loadUserInvitations(userId: string): Promise<Invitation[]> {
+  if (!userId) {
+    return [];
+  }
+
+  const events = await loadEventsFromSource();
+  return events
+    .flatMap((event) => safeArray(event.invitations))
+    .filter((invitation) => invitation.invitedUserId === userId)
+    .map((invitation) =>
+      isInvitationExpired(invitation) && invitation.status === "pending"
+        ? { ...invitation, status: "expired" as const }
+        : invitation,
+    )
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
 
 export async function createEvent(input: {
@@ -455,11 +658,13 @@ export async function createEvent(input: {
     courtCount: input.courtCount,
     roundCount: input.roundCount,
     roundViewMode: input.roundViewMode,
-    status: "waiting",
+    status: "recruiting",
     participants: [hostParticipant],
     rounds: [],
     stats: createStatsRecord([{ id: hostParticipant.id, name: hostParticipant.displayName }]),
     notifications: [],
+    invitations: [],
+    auditLogs: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     isSaved: false,
@@ -527,17 +732,39 @@ export async function findEventByCodeOrName(query: string): Promise<EventRecord 
 
 export async function joinEvent(
   eventId: string,
-  input: { displayName: string; gender: ParticipantGender; guestNtrp?: number | null; userId?: string | null },
+  input: {
+    displayName: string;
+    gender: ParticipantGender;
+    guestNtrp?: number | null;
+    userId?: string | null;
+    inviteId?: string | null;
+  },
 ): Promise<Participant | null> {
   const sessionId = getSessionId("guest");
   const event = await loadEvent(eventId);
   if (!event) {
-    return null;
+    throw new Error("유효하지 않은 참여 링크입니다.");
+  }
+
+  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+    throw new Error("이미 종료된 이벤트입니다.");
   }
 
   const normalizedName = input.displayName.trim();
+  const existingByUser = input.userId
+    ? event.participants.find((participant) => participant.userId === input.userId)
+    : null;
   const existingBySession = event.participants.find((participant) => participant.sessionId === sessionId);
+  if (existingByUser) {
+    if (input.inviteId) {
+      await updateInvitationStatus(eventId, input.inviteId, "accepted");
+    }
+    return existingByUser;
+  }
   if (existingBySession) {
+    if (input.inviteId) {
+      await updateInvitationStatus(eventId, input.inviteId, "accepted");
+    }
     return existingBySession;
   }
 
@@ -545,7 +772,7 @@ export async function joinEvent(
     (participant) => participant.displayName.trim().toLowerCase() === normalizedName.toLowerCase(),
   );
   if (duplicateName) {
-    return null;
+    throw new Error("이미 같은 이름의 참가자가 있습니다.");
   }
 
   const nextParticipant = createParticipant({
@@ -561,9 +788,26 @@ export async function joinEvent(
   });
 
   await updateEvent(eventId, (currentEvent) => ({
-    ...currentEvent,
-    participants: [...currentEvent.participants, nextParticipant],
-  }));
+      ...currentEvent,
+      participants: [...currentEvent.participants, nextParticipant],
+      invitations: safeArray(currentEvent.invitations).map((invitation) =>
+        invitation.id === input.inviteId
+          ? {
+              ...invitation,
+              status: "accepted",
+              respondedAt: new Date().toISOString(),
+            }
+          : invitation,
+      ),
+      notifications: [
+        ...currentEvent.notifications,
+        createEventNotification({
+          eventId,
+          message: `${normalizedName}님이 이벤트에 참여했습니다.`,
+          type: "success",
+        }),
+      ],
+    }));
 
   return nextParticipant;
 }
@@ -627,7 +871,10 @@ export async function generateEventSchedule(eventId: string): Promise<EventRecor
     withDerivedEventState({
       ...currentEvent,
       roundCount: schedule.rounds.length,
-      rounds: withMatchIds(schedule.rounds),
+      rounds: withMatchIds(schedule.rounds).map((round, index) => ({
+        ...round,
+        state: index === 0 ? "assigned" : "waiting",
+      })),
       stats: createStatsRecord(players),
       notifications: [],
       status: "in_progress",
@@ -697,6 +944,7 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
             completed: true,
             forceClosed: Boolean(round.forceClosed),
             closeReason: round.forceClosed ? round.closeReason ?? "force_closed" : "completed",
+            state: "completed" as const,
             matches: round.matches.map((match) => ({
               ...match,
               completed: true,
@@ -706,7 +954,7 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
             })),
           }
         : round,
-    );
+    ) as Round[];
 
     const completedRounds = nextRounds.filter((round) => round.completed);
     let stats = createStatsRecord(buildPlayers(currentEvent.participants));
@@ -727,7 +975,7 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
       rounds: nextRounds,
       stats,
       notifications,
-      status: (allCompleted ? "completed" : "in_progress") as EventRecord["status"],
+      status: (allCompleted ? "finished" : "in_progress") as EventRecord["status"],
     });
   });
 }
@@ -743,9 +991,25 @@ export async function updateMatchScores(
       ...event,
       rounds: event.rounds.map((round) =>
         round.roundNumber === roundNumber
-          ? {
+        ? {
+            ...round,
+            state: currentRoundState({
               ...round,
               matches: round.matches.map((match) =>
+                match.id === matchId
+                  ? {
+                      ...match,
+                      scoreA: scores.scoreA,
+                      scoreB: scores.scoreB,
+                      scoreProposal: null,
+                      isTieBreak:
+                        (scores.scoreA === 6 && scores.scoreB === 5) ||
+                        (scores.scoreA === 5 && scores.scoreB === 6),
+                    }
+                  : match,
+              ),
+            }),
+            matches: round.matches.map((match) =>
                 match.id === matchId
                   ? {
                       ...match,
@@ -779,6 +1043,7 @@ export async function submitMatchScoreProposal(
         round.roundNumber === roundNumber
           ? {
               ...round,
+              state: "score_pending",
               matches: round.matches.map((match) =>
                 match.id === matchId
                   ? {
@@ -808,9 +1073,11 @@ export async function respondToScoreProposal(
   matchId: string,
   participantId: string,
   response: "accept" | "dispute",
+  reason?: string | null,
 ): Promise<EventRecord | null> {
   const nextEvent = await updateEvent(eventId, (event) => {
     const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
+    const actorParticipant = safeArray(event.participants).find((participant) => participant.id === participantId);
 
     return withDerivedEventState({
       ...event,
@@ -818,15 +1085,14 @@ export async function respondToScoreProposal(
         response === "dispute" && hostParticipant
           ? [
               ...event.notifications,
-              {
-                id: makeId("notification_dispute"),
+              createEventNotification({
                 eventId,
                 roundNumber,
                 targetParticipantId: hostParticipant.id,
+                targetUserId: hostParticipant.userId ?? null,
                 message: `점수 이의신청 발생: Round ${roundNumber}, Match ${matchId}`,
-                readAt: null,
-                createdAt: new Date().toISOString(),
-              },
+                type: "dispute",
+              }),
             ]
           : event.notifications,
       rounds: event.rounds.map((round) => {
@@ -837,6 +1103,64 @@ export async function respondToScoreProposal(
         const participantIds = getMatchParticipantIds(round, matchId);
         return {
           ...round,
+          state: currentRoundState({
+            ...round,
+            matches: round.matches.map((match) => {
+              if (match.id !== matchId || !match.scoreProposal) {
+                return match;
+              }
+
+              const acceptedByParticipantIds =
+                response === "accept"
+                  ? Array.from(new Set([...match.scoreProposal.acceptedByParticipantIds, participantId]))
+                  : match.scoreProposal.acceptedByParticipantIds;
+
+              const disputedByParticipantIds =
+                response === "dispute"
+                  ? Array.from(new Set([...match.scoreProposal.disputedByParticipantIds, participantId]))
+                  : match.scoreProposal.disputedByParticipantIds;
+
+              const requiredAcceptCount =
+                participantIds.length >= 4
+                  ? 3
+                  : Math.max(
+                      participantIds.filter(
+                        (id) =>
+                          id !== match.scoreProposal?.submittedByParticipantId &&
+                          isConfirmationRequiredParticipant(event, id),
+                      ).length,
+                      0,
+                    );
+              const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
+
+              return {
+                ...match,
+                scoreA: accepted ? match.scoreProposal.scoreA : match.scoreA ?? null,
+                scoreB: accepted ? match.scoreProposal.scoreB : match.scoreB ?? null,
+                isTieBreak:
+                  accepted &&
+                  ((match.scoreProposal.scoreA === 6 && match.scoreProposal.scoreB === 5) ||
+                    (match.scoreProposal.scoreA === 5 && match.scoreProposal.scoreB === 6)),
+                scoreProposal: {
+                  ...match.scoreProposal,
+                  acceptedByParticipantIds,
+                  disputedByParticipantIds,
+                  comments:
+                    response === "dispute"
+                      ? [
+                          ...safeArray(match.scoreProposal.comments),
+                          {
+                            participantId,
+                            reason: reason ?? null,
+                            createdAt: new Date().toISOString(),
+                          },
+                        ]
+                      : safeArray(match.scoreProposal.comments),
+                  status: disputedByParticipantIds.length > 0 ? "disputed" : accepted ? "accepted" : "pending",
+                },
+              };
+            }),
+          }),
           matches: round.matches.map((match) => {
             if (match.id !== matchId || !match.scoreProposal) {
               return match;
@@ -854,7 +1178,7 @@ export async function respondToScoreProposal(
 
             const requiredAcceptCount =
               participantIds.length >= 4
-                ? 2
+                ? 3
                 : Math.max(
                     participantIds.filter(
                       (id) =>
@@ -877,12 +1201,34 @@ export async function respondToScoreProposal(
                 ...match.scoreProposal,
                 acceptedByParticipantIds,
                 disputedByParticipantIds,
+                comments:
+                  response === "dispute"
+                    ? [
+                        ...safeArray(match.scoreProposal.comments),
+                        {
+                          participantId,
+                          reason: reason ?? null,
+                          createdAt: new Date().toISOString(),
+                        },
+                      ]
+                    : safeArray(match.scoreProposal.comments),
                 status: disputedByParticipantIds.length > 0 ? "disputed" : accepted ? "accepted" : "pending",
               },
             };
           }),
         };
       }),
+      auditLogs:
+        response === "dispute" && actorParticipant?.userId
+          ? appendAuditLog(event, {
+              eventId,
+              actorUserId: actorParticipant.userId,
+              actorName: actorParticipant.displayName,
+              targetUserId: hostParticipant?.userId ?? null,
+              action: "match_disputed",
+              reason: reason ?? null,
+            })
+          : event.auditLogs ?? [],
     });
   });
 
@@ -923,7 +1269,11 @@ export async function skipMatch(eventId: string, roundNumber: number, matchId: s
   );
 }
 
-export async function forceCloseRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
+export async function forceCloseRound(
+  eventId: string,
+  roundNumber: number,
+  audit?: { actorUserId: string; actorName: string; reason?: string | null },
+): Promise<EventRecord | null> {
   const event = await loadEvent(eventId);
   if (!event) {
     return null;
@@ -937,6 +1287,7 @@ export async function forceCloseRound(eventId: string, roundNumber: number): Pro
             completed: true,
             forceClosed: true,
             closeReason: "skipped" as const,
+            state: "completed" as const,
             matches: round.matches.map((match) => ({
               ...match,
               skipped: true,
@@ -947,24 +1298,37 @@ export async function forceCloseRound(eventId: string, roundNumber: number): Pro
             })),
           }
         : round,
-    );
+    ) as Round[];
 
     const nextEvent = {
       ...currentEvent,
       rounds: nextRounds,
-      status: (nextRounds.every((round) => round.completed) ? "completed" : "in_progress") as EventRecord["status"],
+      status: (nextRounds.every((round) => round.completed) ? "finished" : "in_progress") as EventRecord["status"],
       notifications: notifyRoundCompletion({
         event: currentEvent,
         rounds: nextRounds,
         completedRoundNumber: roundNumber,
       }),
+      auditLogs: audit
+        ? appendAuditLog(currentEvent, {
+            eventId,
+            actorUserId: audit.actorUserId,
+            actorName: audit.actorName,
+            action: "round_force_closed",
+            reason: audit.reason ?? null,
+          })
+        : currentEvent.auditLogs ?? [],
     };
 
     return withDerivedEventState(nextEvent);
   });
 }
 
-export async function reassignRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
+export async function reassignRound(
+  eventId: string,
+  roundNumber: number,
+  audit?: { actorUserId: string; actorName: string; reason?: string | null },
+): Promise<EventRecord | null> {
   const event = await loadEvent(eventId);
   if (!event) {
     return null;
@@ -988,6 +1352,15 @@ export async function reassignRound(eventId: string, roundNumber: number): Promi
   return updateEvent(eventId, (currentEvent) =>
     withDerivedEventState({
       ...currentEvent,
+      auditLogs: audit
+        ? appendAuditLog(currentEvent, {
+            eventId,
+            actorUserId: audit.actorUserId,
+            actorName: audit.actorName,
+            action: "round_reassigned",
+            reason: audit.reason ?? null,
+          })
+        : currentEvent.auditLogs ?? [],
       rounds: currentEvent.rounds.map((round) => {
         if (round.roundNumber < roundNumber) {
           return round;
@@ -1046,16 +1419,17 @@ export async function addFutureRound(eventId: string): Promise<EventRecord | nul
           return existing ?? round;
         }
 
-        return {
-          ...round,
-          id: existing.id ?? round.id,
-          matches: round.matches.map((match, index) => ({
+          return {
+            ...round,
+            id: existing.id ?? round.id,
+            state: existing.state ?? round.state ?? "waiting",
+            matches: round.matches.map((match, index) => ({
             ...match,
             id: existing.matches[index]?.id ?? match.id,
           })),
         };
       }),
-      status: (currentEvent.status === "completed" ? "in_progress" : currentEvent.status) as EventRecord["status"],
+      status: ((currentEvent.status === "completed" || currentEvent.status === "finished") ? "in_progress" : currentEvent.status) as EventRecord["status"],
     }),
   );
 }
@@ -1095,12 +1469,17 @@ export async function deleteFutureRound(eventId: string, roundNumber: number): P
       ...currentEvent,
       roundCount: Math.max(0, currentEvent.roundCount - 1),
       rounds: [...preservedRounds, ...remainingFutureRounds],
-      status: ([...preservedRounds, ...remainingFutureRounds].every((round) => round.completed) ? "completed" : "in_progress") as EventRecord["status"],
+      status: ([...preservedRounds, ...remainingFutureRounds].every((round) => round.completed) ? "finished" : "in_progress") as EventRecord["status"],
     }),
   );
 }
 
-export async function reassignSingleMatch(eventId: string, roundNumber: number, matchId: string): Promise<EventRecord | null> {
+export async function reassignSingleMatch(
+  eventId: string,
+  roundNumber: number,
+  matchId: string,
+  audit?: { actorUserId: string; actorName: string; reason?: string | null },
+): Promise<EventRecord | null> {
   const event = await loadEvent(eventId);
   if (!event) {
     return null;
@@ -1141,6 +1520,15 @@ export async function reassignSingleMatch(eventId: string, roundNumber: number, 
   return updateEvent(eventId, (currentEvent) =>
     withDerivedEventState({
       ...currentEvent,
+      auditLogs: audit
+        ? appendAuditLog(currentEvent, {
+            eventId,
+            actorUserId: audit.actorUserId,
+            actorName: audit.actorName,
+            action: "match_reassigned",
+            reason: audit.reason ?? null,
+          })
+        : currentEvent.auditLogs ?? [],
       rounds: currentEvent.rounds.map((round) =>
         round.roundNumber !== roundNumber
           ? round
@@ -1252,7 +1640,7 @@ export function getJoinUrl(eventId: string): string {
 
 export function getParticipantInstruction(event: EventRecord, participantId: string): string {
   const rounds = safeArray(event?.rounds);
-  if (event.status === "waiting" || rounds.length === 0) {
+  if (event.status === "waiting" || event.status === "draft" || event.status === "recruiting" || rounds.length === 0) {
     return "대기 중입니다. 호스트가 대진을 생성하면 자동으로 안내됩니다.";
   }
 
@@ -1290,7 +1678,8 @@ export function getParticipantBySession(event: EventRecord, sessionId: string): 
 }
 
 export function getEventNotifications(event: EventRecord, participantId?: string): Notification[] {
-  return getGuestNotifications(safeArray(event?.notifications), participantId);
+  const participant = participantId ? safeArray(event?.participants).find((item) => item.id === participantId) : null;
+  return getGuestNotifications(safeArray(event?.notifications), participantId, participant?.userId ?? null);
 }
 
 export async function markEventNotificationRead(eventId: string, notificationId: string): Promise<EventRecord | null> {
@@ -1310,4 +1699,12 @@ export async function markEventSaved(
     savedAt: input.savedAt ?? null,
     savedByUserId: input.savedByUserId ?? null,
   }));
+}
+
+export function getInvitationById(event: EventRecord, invitationId: string): Invitation | null {
+  return safeArray(event.invitations).find((invitation) => invitation.id === invitationId) ?? null;
+}
+
+export function canAccessEventAsHost(event: EventRecord | null, userId: string | null | undefined): boolean {
+  return Boolean(event && userId && event.hostUserId === userId);
 }

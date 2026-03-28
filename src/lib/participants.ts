@@ -55,6 +55,7 @@ export function createParticipant(input: {
     userId: input.userId ?? null,
     joinedAt: new Date().toISOString(),
     isActive: true,
+    availabilityState: "active",
   };
 }
 

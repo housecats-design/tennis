@@ -5,6 +5,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import {
   addFutureRound,
   canEditParticipants,
+  createMemberInvitations,
   deleteFutureRound,
   finalizeRound,
   forceCloseRound,
@@ -21,7 +22,7 @@ import {
   subscribeToEvent,
   updateMatchScores,
 } from "@/lib/events";
-import { buildFinalRanking, saveCompletedEventRecord } from "@/lib/history";
+import { buildFinalRanking, loadRecommendedPlayersForHost, saveCompletedEventRecord } from "@/lib/history";
 import { sortLeaderboard } from "@/lib/leaderboard";
 import { ensureUniqueDisplayNames, resolveParticipantSkill } from "@/lib/participants";
 import { loadLastRole } from "@/lib/storage";
@@ -67,6 +68,7 @@ export default function HostEventPage() {
   const [saveInfo, setSaveInfo] = useState<string | null>(null);
   const [roundActionInfo, setRoundActionInfo] = useState<string | null>(null);
   const [roundActionPending, setRoundActionPending] = useState<string | null>(null);
+  const [recommendedMembers, setRecommendedMembers] = useState<Array<{ userId: string; displayName: string; email?: string | null }>>([]);
 
   useEffect(() => {
     if (!eventId) {
@@ -103,6 +105,7 @@ export default function HostEventPage() {
         setProfile(nextProfile);
         setMembers(nextMembers);
         setEvent(nextEvent);
+        setRecommendedMembers(nextProfile ? await loadRecommendedPlayersForHost(nextProfile.id) : []);
         setError(null);
       } catch (error) {
         console.error("[host-event] bootstrap failed", error);
@@ -168,7 +171,7 @@ export default function HostEventPage() {
     const existingUserIds = new Set((event?.participants ?? []).map((participant) => participant.userId).filter(Boolean));
     return members.filter((member) => !member.isDeleted && member.id !== profile?.id && !existingUserIds.has(member.id));
   }, [event?.participants, members, profile?.id]);
-  const finalRanking = useMemo(() => (event?.status === "completed" ? buildFinalRanking(event) : []), [event]);
+  const finalRanking = useMemo(() => (event?.status === "completed" || event?.status === "finished" ? buildFinalRanking(event) : []), [event]);
   const hostParticipantId = useMemo(
     () => event?.participants.find((participant) => participant.role === "host")?.id ?? null,
     [event],
@@ -248,7 +251,26 @@ export default function HostEventPage() {
     setEvent(nextEvent);
     setNewPlayerName("");
     setNewPlayerGender("male");
-    setNewPlayerSkill("medium");
+      setNewPlayerSkill("medium");
+  }
+
+  async function handleInviteMembers(userIds: string[]): Promise<void> {
+    if (!event || !profile || userIds.length === 0) {
+      return;
+    }
+
+    const nextEvent = await createMemberInvitations(event.id, {
+      invitedUserIds: userIds,
+      invitedByUserId: profile.id,
+      invitedByName: profile.displayName,
+      userDirectory: members.map((member) => ({
+        id: member.id,
+        email: member.email,
+        displayName: member.displayName,
+      })),
+    });
+    setEvent(nextEvent);
+    setRoundActionInfo("초대 링크를 저장했습니다. 로그인 중인 회원은 즉시 확인할 수 있고, 오프라인 회원은 다음 로그인 시 인박스에서 확인합니다.");
   }
 
   async function handleAddMemberParticipant(): Promise<void> {
@@ -305,6 +327,7 @@ export default function HostEventPage() {
       const nextEvent = await generateEventSchedule(event.id);
       setError(null);
       setEvent(nextEvent);
+      setRoundActionInfo("Match generation completed successfully.");
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : "대진 생성에 실패했습니다.");
     }
@@ -356,7 +379,12 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await reassignRound(event.id, roundNumber);
+    const reason = window.prompt("라운드 재배정 사유를 입력하세요. (선택)");
+    const nextEvent = await reassignRound(event.id, roundNumber, profile ? {
+      actorUserId: profile.id,
+      actorName: profile.displayName,
+      reason,
+    } : undefined);
     setEvent(nextEvent);
   }
 
@@ -401,7 +429,12 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await forceCloseRound(event.id, roundNumber);
+    const reason = window.prompt("강제 종료 사유를 입력하세요. (선택)");
+    const nextEvent = await forceCloseRound(event.id, roundNumber, profile ? {
+      actorUserId: profile.id,
+      actorName: profile.displayName,
+      reason,
+    } : undefined);
     setEvent(nextEvent);
   }
 
@@ -410,7 +443,12 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await reassignSingleMatch(event.id, roundNumber, matchId);
+    const reason = window.prompt("이 경기 재배정 사유를 입력하세요. (선택)");
+    const nextEvent = await reassignSingleMatch(event.id, roundNumber, matchId, profile ? {
+      actorUserId: profile.id,
+      actorName: profile.displayName,
+      reason,
+    } : undefined);
     setEvent(nextEvent);
   }
 
@@ -616,6 +654,41 @@ export default function HostEventPage() {
                 회원 추가
               </button>
             </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => void handleInviteMembers(selectedMemberId ? [selectedMemberId] : [])}
+                disabled={!selectedMemberId}
+                className="poster-button-secondary disabled:opacity-60"
+              >
+                선택 회원 초대
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-line pt-4">
+            <div className="text-sm font-semibold text-ink">이전 이벤트 기반 추천 회원</div>
+            <div className="mt-3 space-y-3">
+              {recommendedMembers.length > 0 ? recommendedMembers.slice(0, 8).map((member) => {
+                const invitationStatus = (event.invitations ?? []).find((invitation) => invitation.invitedUserId === member.userId)?.status ?? null;
+                return (
+                  <div key={member.userId} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 text-sm">
+                    <div>
+                      <div className="font-semibold">{member.displayName}</div>
+                      <div className="text-ink/60">{member.email ?? "이메일 없음"}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {invitationStatus ? <span className="text-xs font-semibold text-ink/55">상태: {invitationStatus}</span> : null}
+                      <button type="button" onClick={() => void handleInviteMembers([member.userId])} className="poster-button-secondary">
+                        초대 보내기
+                      </button>
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">이전 이벤트 추천 회원이 아직 없습니다.</div>
+              )}
+            </div>
           </div>
 
           <div className="mt-6 border-t border-line pt-4 text-sm font-semibold text-ink">직접 입력</div>
@@ -745,7 +818,7 @@ export default function HostEventPage() {
             </section>
           ) : null}
 
-          {event.status === "completed" ? (
+          {event.status === "completed" || event.status === "finished" ? (
             <section className="border-t border-line py-6">
               <div className="mb-5 flex flex-wrap gap-3">
                 <Link href="/" className="poster-button-secondary">

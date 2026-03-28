@@ -2,8 +2,8 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { loadMatchHistory, loadPairHistory, loadPlayerSavedEvents, loadUserEventHistory } from "@/lib/history";
-import { softDeleteUserProfile, updateUserMemo, getProfileById } from "@/lib/users";
-import { MatchHistoryRecord, PairHistoryRecord, SavedEventSummary, UserEventHistory, UserProfile } from "@/lib/types";
+import { adminUpdateUserGender, softDeleteUserProfile, updateUserMemo, getProfileById } from "@/lib/users";
+import { MatchHistoryRecord, PairHistoryRecord, ParticipantGender, SavedEventSummary, UserEventHistory, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +19,7 @@ export default function AdminUserDetailPage() {
   const [savedEvents, setSavedEvents] = useState<SavedEventSummary[]>([]);
   const [pairHistory, setPairHistory] = useState<PairHistoryRecord[]>([]);
   const [matchHistory, setMatchHistory] = useState<MatchHistoryRecord[]>([]);
+  const [gender, setGender] = useState<ParticipantGender | "unspecified">("unspecified");
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -46,6 +47,7 @@ export default function AdminUserDetailPage() {
         ]);
         setProfile(nextProfile);
         setMemo(nextProfile?.memo ?? "");
+        setGender(nextProfile?.gender ?? "unspecified");
         setEventHistory(events);
         setPairHistory(pairs);
         setMatchHistory(matches);
@@ -115,7 +117,7 @@ export default function AdminUserDetailPage() {
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">{profile.displayName}</h1>
         <div className="mt-4 text-sm text-ink/65">{profile.loginId} · {profile.email}</div>
         <div className="mt-4 grid gap-2 text-sm text-ink/68 sm:grid-cols-2">
-          <div>성별: {latestRankingEntry?.gender === "male" ? "남성" : latestRankingEntry?.gender === "female" ? "여성" : "미정"}</div>
+          <div>성별: {profile.gender === "male" ? "남성" : profile.gender === "female" ? "여성" : profile.gender === "other" ? "기타" : "미정"}</div>
           <div>NTRP: {typeof latestRankingEntry?.guestNtrp === "number" ? latestRankingEntry.guestNtrp.toFixed(1) : "-"}</div>
           <div className="sm:col-span-2">
             삭제 상태: {profile.isDeleted ? `삭제됨${profile.deletedAt ? ` · ${new Date(profile.deletedAt).toLocaleString("ko-KR")}` : ""}` : "활성"}
@@ -126,6 +128,15 @@ export default function AdminUserDetailPage() {
       <section className="border-t border-line py-6">
         <h2 className="text-3xl font-black">관리 메모</h2>
         <textarea value={memo} onChange={(event) => setMemo(event.target.value)} className="poster-input mt-4 min-h-28 w-full" />
+        <div className="mt-4 grid gap-2 text-sm font-semibold sm:max-w-xs">
+          성별 수정
+          <select value={gender} onChange={(event) => setGender(event.target.value as ParticipantGender)} className="poster-input">
+            <option value="male">남성</option>
+            <option value="female">여성</option>
+            <option value="other">기타</option>
+            <option value="unspecified">미정</option>
+          </select>
+        </div>
         <div className="mt-4 flex gap-3">
           <button
             type="button"
@@ -139,6 +150,19 @@ export default function AdminUserDetailPage() {
             className="poster-button"
           >
             메모 저장
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const next = await adminUpdateUserGender(viewer.id, profile.id, gender);
+              if (next) {
+                setProfile(next);
+                setInfo("성별을 수정하고 감사 로그를 남겼습니다.");
+              }
+            }}
+            className="poster-button-secondary"
+          >
+            성별 저장
           </button>
           <button
             type="button"

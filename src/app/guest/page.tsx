@@ -1,8 +1,8 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
-import { findEventByCodeOrName, joinEvent } from "@/lib/events";
-import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
+import { findEventByCodeOrName, getInvitationById, joinEvent, loadEvent } from "@/lib/events";
+import { saveLastEvent, saveLastParticipant, savePostLoginRedirect } from "@/lib/storage";
 import { ParticipantGender, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ export default function GuestPage() {
   const [gender, setGender] = useState<ParticipantGender | "">("");
   const [guestNtrp, setGuestNtrp] = useState(3.5);
   const [eventQuery, setEventQuery] = useState("");
+  const [inviteId, setInviteId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -26,6 +27,7 @@ export default function GuestPage() {
       const currentProfile = await getCurrentProfile();
       setProfile(currentProfile);
       setDisplayName(currentProfile?.displayName ?? "");
+      setGender(currentProfile?.gender && currentProfile.gender !== "unspecified" ? currentProfile.gender : "");
       setCheckingAuth(false);
     };
 
@@ -34,13 +36,77 @@ export default function GuestPage() {
     try {
       const searchParams = new URLSearchParams(window.location.search);
       const eventId = searchParams.get("eventId");
+      const invite = searchParams.get("invite");
       if (eventId) {
         setEventQuery(eventId);
+      }
+      if (invite) {
+        setInviteId(invite);
       }
     } catch (error) {
       console.error("[guest-join] failed to read search params", error);
     }
   }, []);
+
+  useEffect(() => {
+    const autoJoin = async () => {
+      if (checkingAuth || !eventQuery.trim()) {
+        return;
+      }
+
+      if (!profile) {
+        if (typeof window !== "undefined") {
+          savePostLoginRedirect(window.location.pathname + window.location.search);
+        }
+        router.replace("/");
+        return;
+      }
+
+      if (inviteId) {
+        setSubmitting(true);
+        try {
+          const targetEvent = await loadEvent(eventQuery.trim());
+          if (!targetEvent) {
+            setError("유효하지 않은 참여 링크입니다.");
+            return;
+          }
+
+          if (targetEvent.status === "finished" || targetEvent.status === "completed" || targetEvent.status === "archived") {
+            setError("이미 종료된 이벤트입니다.");
+            return;
+          }
+
+          const invitation = getInvitationById(targetEvent, inviteId);
+          if (!invitation) {
+            setError("만료되었거나 유효하지 않은 초대 링크입니다.");
+            return;
+          }
+
+          const participant = await joinEvent(targetEvent.id, {
+            displayName: profile.displayName,
+            gender: profile.gender === "unspecified" ? "other" : profile.gender,
+            guestNtrp: null,
+            userId: profile.id,
+            inviteId,
+          });
+          if (!participant?.id) {
+            setError("이벤트 참여에 실패했습니다.");
+            return;
+          }
+
+          saveLastEvent(targetEvent.id);
+          saveLastParticipant(participant.id);
+          router.replace(`/guest/event/${targetEvent.id}`);
+        } catch (autoJoinError) {
+          setError(autoJoinError instanceof Error ? autoJoinError.message : "초대 링크 처리에 실패했습니다.");
+        } finally {
+          setSubmitting(false);
+        }
+      }
+    };
+
+    void autoJoin();
+  }, [checkingAuth, eventQuery, inviteId, profile, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -64,11 +130,17 @@ export default function GuestPage() {
         return;
       }
 
+      if (targetEvent.status === "finished" || targetEvent.status === "completed" || targetEvent.status === "archived") {
+        setError("이미 종료된 이벤트입니다.");
+        return;
+      }
+
       const participant = await joinEvent(targetEvent.id, {
         displayName,
         gender,
         guestNtrp,
         userId: profile.id,
+        inviteId: inviteId || null,
       });
       if (!participant?.id) {
         setError("이벤트 참여에 실패했습니다. 중복 이름인지 확인해 주세요.");
@@ -112,6 +184,7 @@ export default function GuestPage() {
         <p className="mt-4 text-sm leading-6 text-ink/68">
           로그인 계정으로 이벤트에 참여하고 현재 라운드, 코트, 알림, 종료 후 내 기록을 확인합니다.
         </p>
+        {inviteId ? <p className="mt-2 text-sm text-accentStrong">초대 링크가 감지되었습니다. 로그인 상태라면 자동으로 참여를 시도합니다.</p> : null}
       </div>
 
       <div className="mb-6 flex flex-wrap gap-3 border-t border-line py-4">
@@ -130,10 +203,11 @@ export default function GuestPage() {
           성별
           <select value={gender} onChange={(event) => setGender(event.target.value as ParticipantGender)} className="poster-input">
             <option value="">선택</option>
-            <option value="male">남성</option>
-            <option value="female">여성</option>
-          </select>
-        </label>
+              <option value="male">남성</option>
+              <option value="female">여성</option>
+              <option value="other">기타</option>
+            </select>
+          </label>
 
         <label className="grid gap-2 text-sm font-semibold">
           이벤트 코드 또는 이벤트 이름

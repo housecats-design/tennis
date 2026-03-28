@@ -1,8 +1,9 @@
 "use client";
 
-import { loadEvent, subscribeToEvent } from "@/lib/events";
+import { getCurrentProfile } from "@/lib/auth";
+import { canAccessEventAsHost, loadEvent, subscribeToEvent } from "@/lib/events";
 import { buildMatchHistory, sortLeaderboard } from "@/lib/leaderboard";
-import { Player, SortDirection } from "@/lib/types";
+import { Player, SortDirection, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -12,6 +13,7 @@ export default function EventLeaderboardPage() {
   const eventId = params.id;
   const [event, setEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     if (!eventId) {
@@ -19,7 +21,9 @@ export default function EventLeaderboardPage() {
     }
 
     const refresh = async () => {
-      setEvent(await loadEvent(eventId));
+      const [nextEvent, nextProfile] = await Promise.all([loadEvent(eventId), getCurrentProfile()]);
+      setEvent(nextEvent);
+      setProfile(nextProfile);
     };
 
     void refresh();
@@ -51,9 +55,15 @@ export default function EventLeaderboardPage() {
   return (
     <main className="poster-page max-w-6xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        <Link href={`/host/event/${event.id}`} className="poster-button">
-          호스트 대시보드
-        </Link>
+        {canAccessEventAsHost(event, profile?.id) ? (
+          <Link href={`/host/event/${event.id}`} className="poster-button">
+            Go to Host Dashboard
+          </Link>
+        ) : (
+          <Link href="/" className="poster-button">
+            Go to Main Page
+          </Link>
+        )}
         <button type="button" onClick={() => setSortDirection((current) => (current === "asc" ? "desc" : "asc"))} className="poster-button-secondary">
           승수 정렬 전환
         </button>

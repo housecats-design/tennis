@@ -2,6 +2,7 @@
 
 import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent } from "@/lib/events";
 import { buildFinalRanking } from "@/lib/history";
+import { getCurrentProfile } from "@/lib/auth";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
 import { Notification } from "@/lib/types";
 import Link from "next/link";
@@ -33,7 +34,7 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
   }
 
   const rounds = Array.isArray(event.rounds) ? event.rounds : [];
-  if (event.status === "waiting" || rounds.length === 0) {
+  if (event.status === "waiting" || event.status === "draft" || event.status === "recruiting" || rounds.length === 0) {
     return { title: "대기 중", body: "호스트가 아직 대진을 생성하지 않았습니다." };
   }
 
@@ -81,6 +82,7 @@ export default function GuestEventPage() {
   const [error, setError] = useState<string | null>(null);
   const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
   const [pendingCustomScore, setPendingCustomScore] = useState<{ scoreA: number; scoreB: number } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -94,11 +96,12 @@ export default function GuestEventPage() {
     const syncEvent = async () => {
       try {
         console.debug("[guest-event] sync start", { eventId });
-        const event = await loadEvent(eventId);
+        const [event, profile] = await Promise.all([loadEvent(eventId), getCurrentProfile()]);
         const participants = Array.isArray(event?.participants) ? event.participants : [];
         const lastParticipantId = loadLastParticipant();
         const participant =
           (event ? getParticipantBySession(event, sessionId) : null) ??
+          (profile?.id ? participants.find((item) => item.userId === profile.id) ?? null : null) ??
           (lastParticipantId ? participants.find((item) => item.id === lastParticipantId) ?? null : null);
 
         setCurrentEvent(event);
@@ -107,7 +110,14 @@ export default function GuestEventPage() {
           participant
             ? {
                 name: participant.displayName,
-                gender: participant.gender === "male" ? "남성" : participant.gender === "female" ? "여성" : "미정",
+                gender:
+                  participant.gender === "male"
+                    ? "남성"
+                    : participant.gender === "female"
+                      ? "여성"
+                      : participant.gender === "other"
+                        ? "기타"
+                        : "미정",
                 ntrp: typeof participant.guestNtrp === "number" ? participant.guestNtrp.toFixed(1) : "-",
               }
             : null,
@@ -166,7 +176,7 @@ export default function GuestEventPage() {
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
   const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
-  const finalRanking = useMemo(() => (currentEvent?.status === "completed" ? buildFinalRanking(currentEvent) : []), [currentEvent]);
+  const finalRanking = useMemo(() => (currentEvent?.status === "completed" || currentEvent?.status === "finished" ? buildFinalRanking(currentEvent) : []), [currentEvent]);
   const hasAcceptedProposal = Boolean(
     participantId && currentMatch?.scoreProposal?.acceptedByParticipantIds.includes(participantId),
   );
@@ -229,14 +239,24 @@ export default function GuestEventPage() {
     await submitProposalScores(scoreA, scoreB);
   }
 
-  async function handleProposalResponse(response: "accept" | "dispute"): Promise<void> {
+  async function handleDispute(): Promise<void> {
+    const reason = window.prompt("이의신청 사유를 입력하세요. (선택)");
+    await handleProposalResponse("dispute", reason ?? null);
+  }
+
+  async function handleProposalResponse(response: "accept" | "dispute", reason?: string | null): Promise<void> {
     if (!eventId || !currentRound || !currentMatch || !participantId) {
       return;
     }
 
-    await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response);
+    await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response, reason);
     if (response === "accept") {
       window.alert("확인되었습니다.");
+      setToastMessage("Moving to next round.");
+      window.setTimeout(() => setToastMessage(null), 1800);
+    } else {
+      setToastMessage("이의신청이 접수되었습니다.");
+      window.setTimeout(() => setToastMessage(null), 1800);
     }
   }
 
@@ -281,7 +301,7 @@ export default function GuestEventPage() {
   return (
     <main className="poster-page max-w-4xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        {currentEvent?.status === "completed" ? (
+        {currentEvent?.status === "completed" || currentEvent?.status === "finished" ? (
           <Link href="/" className="poster-button-secondary">
             메인페이지 이동
           </Link>
@@ -295,6 +315,12 @@ export default function GuestEventPage() {
           </Link>
         ) : null}
       </div>
+
+      {toastMessage ? (
+        <div className="mb-4 border-l-2 border-accentStrong pl-4 text-sm font-semibold text-accentStrong">
+          {toastMessage}
+        </div>
+      ) : null}
 
       <section className="border-t border-line py-6">
         <p className="poster-label">Player Status</p>
@@ -412,7 +438,7 @@ export default function GuestEventPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleProposalResponse("dispute")}
+                      onClick={() => void handleDispute()}
                       disabled={hasAcceptedProposal || hasDisputedProposal}
                       className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
                     >
@@ -483,7 +509,7 @@ export default function GuestEventPage() {
           )}
         </div>
 
-        {currentEvent?.status === "completed" ? (
+        {currentEvent?.status === "completed" || currentEvent?.status === "finished" ? (
           <div className="mt-8 border-t border-line pt-6">
             <div className="text-xl font-black">이벤트 최종 리더보드</div>
             <div className="mt-3 space-y-2 text-sm">

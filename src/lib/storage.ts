@@ -7,6 +7,7 @@ const LAST_EVENT_STORAGE_KEY = "tennis-last-event";
 const LAST_PARTICIPANT_STORAGE_KEY = "tennis-last-participant";
 const EVENT_BROADCAST_PREFIX = "tennis-event-channel";
 const LAST_ROLE_STORAGE_KEY = "tennis-last-role";
+const POST_LOGIN_REDIRECT_STORAGE_KEY = "tennis-post-login-redirect";
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined";
@@ -117,4 +118,28 @@ export function loadLastRole(): "host" | "player" | null {
 
   const role = window.localStorage.getItem(LAST_ROLE_STORAGE_KEY);
   return role === "host" || role === "player" ? role : null;
+}
+
+export function savePostLoginRedirect(url: string): void {
+  if (!canUseStorage() || !url.trim()) {
+    return;
+  }
+
+  window.localStorage.setItem(POST_LOGIN_REDIRECT_STORAGE_KEY, url);
+}
+
+export function loadPostLoginRedirect(): string | null {
+  if (!canUseStorage()) {
+    return null;
+  }
+
+  return window.localStorage.getItem(POST_LOGIN_REDIRECT_STORAGE_KEY);
+}
+
+export function clearPostLoginRedirect(): void {
+  if (!canUseStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(POST_LOGIN_REDIRECT_STORAGE_KEY);
 }

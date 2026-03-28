@@ -397,6 +397,29 @@ export async function loadHostSavedEvents(userId: string): Promise<SavedEventSum
   return items.filter((item) => item.hostUserId === userId);
 }
 
+export async function loadRecommendedPlayersForHost(userId: string): Promise<Array<{ userId: string; displayName: string; email?: string | null }>> {
+  const [events, profiles] = await Promise.all([loadHostSavedEvents(userId), listProfiles()]);
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+  const map = new Map<string, { userId: string; displayName: string; email?: string | null }>();
+
+  for (const event of events) {
+    for (const player of event.ranking) {
+      if (!player.userId || player.userId === userId) {
+        continue;
+      }
+
+      const profile = profileMap.get(player.userId);
+      map.set(player.userId, {
+        userId: player.userId,
+        displayName: profile?.displayName ?? player.name,
+        email: profile?.email ?? null,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 export async function loadPlayerSavedEvents(userId: string): Promise<SavedEventSummary[]> {
   const items = await loadSavedEvents();
   return items.filter((item) => item.ranking.some((player) => player.userId === userId));

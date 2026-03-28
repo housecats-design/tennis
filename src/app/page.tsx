@@ -11,8 +11,16 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { loadLastRole, saveLastRole } from "@/lib/storage";
-import { AuthMode, AppRole, UserProfile } from "@/lib/types";
+import { joinEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import {
+  clearPostLoginRedirect,
+  loadLastRole,
+  loadPostLoginRedirect,
+  saveLastEvent,
+  saveLastParticipant,
+  saveLastRole,
+} from "@/lib/storage";
+import { AuthMode, AppRole, Invitation, ParticipantGender, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -28,6 +36,7 @@ export default function HomePage() {
   const [loginId, setLoginId] = useState("");
   const [realName, setRealName] = useState("");
   const [nickname, setNickname] = useState("");
+  const [gender, setGender] = useState<ParticipantGender | "">("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loginIdValidation, setLoginIdValidation] = useState<string | null>(null);
@@ -38,10 +47,18 @@ export default function HomePage() {
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
 
   useEffect(() => {
     const sync = async () => {
-      setProfile(await getCurrentProfile());
+      const nextProfile = await getCurrentProfile();
+      setProfile(nextProfile);
+      if (nextProfile?.id) {
+        setInvitations(await loadUserInvitations(nextProfile.id));
+      } else {
+        setInvitations([]);
+      }
       setAuthLoading(false);
     };
 
@@ -65,6 +82,13 @@ export default function HomePage() {
       if (mode === "login") {
         const nextProfile = await signInAccount(identifier, password);
         setProfile(nextProfile);
+        setInvitations(await loadUserInvitations(nextProfile.id));
+        const redirectUrl = loadPostLoginRedirect();
+        if (redirectUrl) {
+          clearPostLoginRedirect();
+          router.replace(redirectUrl);
+          return;
+        }
         setInfo("로그인되었습니다. 역할을 선택해 이동하세요.");
       } else {
         const normalizedLoginId = loginId.trim().toLowerCase();
@@ -84,10 +108,12 @@ export default function HomePage() {
           email: normalizedEmail,
           realName,
           nickname,
+          gender: gender as "male" | "female" | "other",
           password,
           confirmPassword,
         });
         setProfile(nextProfile);
+        setInvitations(await loadUserInvitations(nextProfile.id));
         window.alert("회원가입이 완료되었습니다.");
         router.replace("/");
         setInfo("회원가입이 완료되었습니다. 역할을 선택해 이동하세요.");
@@ -189,6 +215,44 @@ export default function HomePage() {
     return false;
   }
 
+  async function handleInvitationResponse(invitation: Invitation, response: "accept" | "decline"): Promise<void> {
+    if (!profile) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (response === "decline") {
+        await updateInvitationStatus(invitation.eventId, invitation.id, "declined");
+        setInvitations(await loadUserInvitations(profile.id));
+        setInfo("초대를 거절했습니다.");
+        return;
+      }
+
+      const participant = await joinEvent(invitation.eventId, {
+        displayName: profile.displayName,
+        gender: profile.gender === "unspecified" ? "other" : profile.gender,
+        guestNtrp: null,
+        userId: profile.id,
+        inviteId: invitation.id,
+      });
+      if (!participant) {
+        throw new Error("이벤트 참여에 실패했습니다.");
+      }
+
+      saveLastEvent(invitation.eventId);
+      saveLastParticipant(participant.id);
+      await updateInvitationStatus(invitation.eventId, invitation.id, "accepted");
+      setInvitations(await loadUserInvitations(profile.id));
+      router.push(`/guest/event/${invitation.eventId}`);
+    } catch (invitationError) {
+      setError(invitationError instanceof Error ? invitationError.message : "초대 처리에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <main className="poster-page flex min-h-screen items-start py-12">
       <section className="grid w-full gap-10 border-t border-line py-10 lg:grid-cols-[1.05fr_0.95fr]">
@@ -225,6 +289,9 @@ export default function HomePage() {
                     관리자
                   </Link>
                 ) : null}
+                <Link href="/profile" className="poster-button-secondary">
+                  프로필 설정
+                </Link>
                 <button type="button" onClick={() => void signOutAccount()} className="poster-button-secondary">
                   로그아웃
                 </button>
@@ -235,6 +302,22 @@ export default function HomePage() {
             </div>
           ) : null}
         </div>
+
+        {profile && pendingInvitation ? (
+          <div className="border border-accentStrong/25 bg-surface p-5 text-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-accentStrong">Invitation</div>
+            <div className="mt-3 text-lg font-black">Host {pendingInvitation.invitedByName} invited you. Do you want to accept?</div>
+            <div className="mt-2 text-ink/70">{pendingInvitation.eventName} · 코드 {pendingInvitation.code}</div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleInvitationResponse(pendingInvitation, "accept")} className="poster-button">
+                수락
+              </button>
+              <button type="button" onClick={() => void handleInvitationResponse(pendingInvitation, "decline")} className="poster-button-secondary">
+                거절
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {!profile && !authLoading ? (
           <form onSubmit={handleSubmit} className="grid gap-5 border-y border-line py-8">
@@ -283,6 +366,15 @@ export default function HomePage() {
                 <label className="grid gap-2 text-sm font-semibold">
                   별명
                   <input value={nickname} onChange={(event) => setNickname(event.target.value)} className="poster-input" />
+                </label>
+                <label className="grid gap-2 text-sm font-semibold">
+                  성별
+                  <select value={gender} onChange={(event) => setGender(event.target.value as ParticipantGender)} className="poster-input">
+                    <option value="">선택</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
                 </label>
                 <label className="grid gap-2 text-sm font-semibold">
                   아이디
@@ -358,6 +450,43 @@ export default function HomePage() {
         ) : null}
         {!profile && authLoading ? <div className="border-y border-line py-8 text-sm text-ink/70">세션을 확인하는 중...</div> : null}
       </section>
+      {profile ? (
+        <section className="border-t border-line py-10">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="poster-label">Notification Center</p>
+              <h2 className="mt-2 text-3xl font-black tracking-[-0.03em]">최근 초대 및 중요 알림</h2>
+            </div>
+            <div className="text-sm text-ink/55">{invitations.length}개</div>
+          </div>
+          <div className="mt-5 space-y-3">
+            {invitations.length > 0 ? invitations.slice(0, 6).map((invitation) => (
+              <div key={invitation.id} className="border-b border-line py-4">
+                <div className="text-sm font-semibold">
+                  {invitation.eventName} · {invitation.status === "pending" ? "초대 대기" : invitation.status === "accepted" ? "수락" : invitation.status === "declined" ? "거절" : "만료"}
+                </div>
+                <div className="mt-1 text-sm text-ink/68">
+                  호스트 {invitation.invitedByName} · 코드 {invitation.code}
+                </div>
+                {invitation.status === "pending" ? (
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <button type="button" onClick={() => void handleInvitationResponse(invitation, "accept")} className="poster-button">
+                      수락하고 참여
+                    </button>
+                    <button type="button" onClick={() => void handleInvitationResponse(invitation, "decline")} className="poster-button-secondary">
+                      거절
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )) : (
+              <div className="border-b border-dashed border-line py-4 text-sm text-ink/68">
+                아직 확인할 초대나 중요 알림이 없습니다.
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

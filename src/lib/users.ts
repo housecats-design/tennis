@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthIdentity, UserProfile } from "@/lib/types";
+import { AuthIdentity, ParticipantGender, UserProfile } from "@/lib/types";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
 
 const USER_PROFILES_STORAGE_KEY = "tennis-user-profiles";
@@ -13,6 +13,8 @@ type UserProfileRow = {
   real_name?: string | null;
   nickname?: string | null;
   display_name: string;
+  gender?: ParticipantGender | null;
+  gender_locked_at?: string | null;
   is_admin: boolean | null;
   memo: string | null;
   is_deleted: boolean | null;
@@ -56,7 +58,12 @@ function isUserProfilesSchemaMismatch(message: string): boolean {
   return (
     normalized.includes("schema cache") &&
     normalized.includes("user_profiles") &&
-    (normalized.includes("nickname") || normalized.includes("real_name") || normalized.includes("display_name"))
+    (
+      normalized.includes("nickname") ||
+      normalized.includes("real_name") ||
+      normalized.includes("display_name") ||
+      normalized.includes("gender")
+    )
   );
 }
 
@@ -80,6 +87,10 @@ export function formatProfileDisplayName(realName?: string | null, nickname?: st
   return normalizedFallback;
 }
 
+function normalizeGender(value: string | null | undefined): ParticipantGender {
+  return value === "male" || value === "female" || value === "other" ? value : "unspecified";
+}
+
 function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?: string }): UserProfile {
   const resolvedUserId = row.user_id ?? row.id;
   if (!resolvedUserId) {
@@ -97,6 +108,8 @@ function normalizeProfile(row: Partial<UserProfileRow> & { user_id?: string; id?
     realName,
     nickname,
     displayName,
+    gender: normalizeGender(row.gender as string | null | undefined),
+    genderLockedAt: row.gender_locked_at ?? null,
     isAdmin: Boolean(row.is_admin),
     memo: row.memo ?? "",
     isDeleted: Boolean(row.is_deleted),
@@ -142,7 +155,7 @@ async function loadProfileByField(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, real_name, nickname, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .eq(field, value)
     .maybeSingle();
 
@@ -226,6 +239,7 @@ export async function ensureUserProfile(input: {
   displayName?: string;
   realName?: string;
   nickname?: string;
+  gender?: ParticipantGender;
 }): Promise<UserProfile> {
   const identityEmail = input.identity.email.toLowerCase();
   const current =
@@ -253,6 +267,8 @@ export async function ensureUserProfile(input: {
     realName: nextRealName,
     nickname: nextNickname,
     displayName: nextDisplayName,
+    gender: current?.gender ?? normalizeGender(input.gender),
+    genderLockedAt: current?.genderLockedAt ?? (input.gender && input.gender !== "unspecified" ? new Date().toISOString() : null),
     isAdmin: current?.isAdmin ?? false,
     memo: current?.memo ?? "",
     isDeleted: current?.isDeleted ?? false,
@@ -276,6 +292,8 @@ export async function ensureUserProfile(input: {
     real_name: profile.realName,
     nickname: profile.nickname,
     display_name: profile.displayName,
+    gender: profile.gender,
+    gender_locked_at: profile.genderLockedAt ?? null,
     is_admin: profile.isAdmin,
     memo: profile.memo,
     is_deleted: profile.isDeleted,
@@ -300,6 +318,8 @@ export async function ensureUserProfile(input: {
         real_name: profile.realName,
         nickname: profile.nickname,
         display_name: profile.displayName,
+        gender: profile.gender,
+        gender_locked_at: profile.genderLockedAt ?? null,
         is_admin: profile.isAdmin,
         memo: profile.memo,
         is_deleted: profile.isDeleted,
@@ -339,7 +359,7 @@ export async function listProfiles(): Promise<UserProfile[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("user_profiles")
-    .select("user_id, email, login_id, real_name, nickname, display_name, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
+    .select("user_id, email, login_id, real_name, nickname, display_name, gender, gender_locked_at, is_admin, memo, is_deleted, deleted_at, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
@@ -370,6 +390,94 @@ export async function updateUserMemo(userId: string, memo: string): Promise<User
       .from("user_profiles")
       .update({ memo, updated_at: nextProfile.updatedAt })
       .eq("user_id", userId);
+  }
+
+  return nextProfile;
+}
+
+export async function updateProfileSettings(
+  userId: string,
+  input: { nickname?: string; gender?: ParticipantGender },
+): Promise<UserProfile | null> {
+  const current = await getProfileById(userId);
+  if (!current) {
+    return null;
+  }
+
+  if (input.gender && input.gender !== "unspecified" && current.gender !== "unspecified" && current.genderLockedAt) {
+    throw new Error("성별은 한 번만 설정할 수 있습니다. 변경이 필요하면 관리자에게 문의해 주세요.");
+  }
+
+  const nextNickname = input.nickname?.trim() ?? current.nickname;
+  const nextGender = input.gender && input.gender !== "unspecified" ? input.gender : current.gender;
+  const nextProfile = {
+    ...current,
+    nickname: nextNickname,
+    displayName: formatProfileDisplayName(current.realName, nextNickname, current.displayName),
+    gender: nextGender,
+    genderLockedAt:
+      nextGender !== "unspecified"
+        ? current.genderLockedAt ?? new Date().toISOString()
+        : current.genderLockedAt ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+  cacheProfile(nextProfile);
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    await supabase!
+      .from("user_profiles")
+      .update({
+        nickname: nextProfile.nickname,
+        display_name: nextProfile.displayName,
+        gender: nextProfile.gender,
+        gender_locked_at: nextProfile.genderLockedAt ?? null,
+        updated_at: nextProfile.updatedAt,
+      })
+      .eq("user_id", userId);
+  }
+
+  return nextProfile;
+}
+
+export async function adminUpdateUserGender(
+  adminUserId: string,
+  targetUserId: string,
+  gender: ParticipantGender,
+): Promise<UserProfile | null> {
+  const current = await getProfileById(targetUserId);
+  if (!current) {
+    return null;
+  }
+
+  const nextProfile = {
+    ...current,
+    gender,
+    genderLockedAt: current.genderLockedAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  cacheProfile(nextProfile);
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    await supabase!
+      .from("user_profiles")
+      .update({
+        gender,
+        gender_locked_at: nextProfile.genderLockedAt ?? null,
+        updated_at: nextProfile.updatedAt,
+      })
+      .eq("user_id", targetUserId);
+
+    await supabase!.from("admin_audit_logs").insert({
+      id: `audit_${crypto.randomUUID().slice(0, 8)}`,
+      admin_user_id: adminUserId,
+      target_user_id: targetUserId,
+      action: "update_gender",
+      previous_value: current.gender,
+      next_value: gender,
+      created_at: new Date().toISOString(),
+    });
   }
 
   return nextProfile;
