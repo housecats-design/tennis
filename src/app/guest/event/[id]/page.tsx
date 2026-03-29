@@ -251,7 +251,7 @@ export default function GuestEventPage() {
   }, [currentEvent?.participants, participantId]);
 
   useEffect(() => {
-    if (!currentEvent || (currentEvent.status !== "completed" && currentEvent.status !== "finished")) {
+    if (!currentEvent || !["completed_unsaved", "completed", "finished"].includes(currentEvent.status)) {
       setFinalRanking([]);
       return;
     }
@@ -362,7 +362,7 @@ export default function GuestEventPage() {
   return (
     <main className="poster-page max-w-4xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        {currentEvent?.status === "completed" || currentEvent?.status === "finished" ? (
+        {["completed_unsaved", "completed", "finished"].includes(currentEvent?.status ?? "") ? (
           <Link href="/" className="poster-button-secondary">
             메인페이지 이동
           </Link>
@@ -575,7 +575,7 @@ export default function GuestEventPage() {
           )}
         </div>
 
-        {currentEvent?.status === "completed" || currentEvent?.status === "finished" ? (
+        {["completed_unsaved", "completed", "finished"].includes(currentEvent?.status ?? "") ? (
           <div className="mt-8 border-t border-line pt-6">
             <div className="text-xl font-black">이벤트 최종 리더보드</div>
             <div className="mt-3 space-y-2 text-sm">

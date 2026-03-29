@@ -99,7 +99,7 @@ export default function GuestPage() {
             return;
           }
 
-          if (targetEvent.status === "finished" || targetEvent.status === "completed" || targetEvent.status === "archived") {
+          if (["finished", "completed", "completed_unsaved", "cancelled", "archived"].includes(targetEvent.status)) {
             setError("이미 종료된 이벤트입니다.");
             return;
           }
@@ -172,7 +172,7 @@ export default function GuestPage() {
         return;
       }
 
-      if (targetEvent.status === "finished" || targetEvent.status === "completed" || targetEvent.status === "archived") {
+      if (["finished", "completed", "completed_unsaved", "cancelled", "archived"].includes(targetEvent.status)) {
         setError("이미 종료된 이벤트입니다.");
         return;
       }

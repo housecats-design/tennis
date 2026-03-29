@@ -320,7 +320,13 @@ function isParticipantActionRequired(event: EventRecord, participant: Participan
 }
 
 function resolveParticipantSessionStatus(event: EventRecord, participant: Participant): ParticipantActiveSessionStatus {
-  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+  if (
+    event.status === "finished" ||
+    event.status === "completed" ||
+    event.status === "completed_unsaved" ||
+    event.status === "cancelled" ||
+    event.status === "archived"
+  ) {
     return "closed";
   }
 
@@ -449,6 +455,39 @@ async function syncEventParticipantSessions(event: EventRecord): Promise<void> {
       .filter((participant) => participant.userId)
       .map((participant) => persistParticipantPresence(event, participant)),
   );
+}
+
+async function closeEventParticipantSessions(event: EventRecord, sessionStatus: "closed" | "expired" = "closed"): Promise<void> {
+  if (!isSupabaseEnabled()) {
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return;
+  }
+
+  const participantIds = safeArray(event.participants)
+    .map((participant) => participant.id)
+    .filter(Boolean);
+
+  if (participantIds.length === 0) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("participant_active_sessions")
+    .update({
+      session_status: sessionStatus,
+      expires_at: sessionStatus === "expired" ? now : null,
+      last_seen_at: now,
+    })
+    .in("participant_id", participantIds);
+
+  if (error && !isMissingSessionSchemaError(error)) {
+    console.error("[events] close event sessions failed", error);
+  }
 }
 
 function normalizeParticipantActiveSession(row: ParticipantActiveSessionRow): ParticipantActiveSession {
@@ -654,6 +693,20 @@ export async function loadAllEvents(): Promise<EventRecord[]> {
   return loadEventsFromSource();
 }
 
+export async function findLatestHostEvent(hostUserId: string): Promise<EventRecord | null> {
+  if (!hostUserId) {
+    return null;
+  }
+
+  const events = await loadEventsFromSource();
+  return (
+    events
+      .filter((event) => event.hostUserId === hostUserId)
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+      .find((event) => !["finished", "cancelled", "archived"].includes(event.status)) ?? null
+  );
+}
+
 function emitEventUpdate(event: EventRecord): void {
   const channel = createEventBroadcastChannel(event.id);
   channel?.postMessage({ type: "event_updated", eventId: event.id });
@@ -787,6 +840,10 @@ function withDerivedEventState(event: EventRecord): EventRecord {
 function toActiveEventStatus(status: EventRecord["status"]): EventRecord["status"] {
   if (status === "finished" || status === "completed") {
     return "finished";
+  }
+
+  if (status === "completed_unsaved" || status === "cancelled" || status === "archived") {
+    return status;
   }
 
   if (status === "draft" || status === "waiting") {
@@ -1084,7 +1141,13 @@ export async function joinEvent(
     throw new Error("유효하지 않은 참여 링크입니다.");
   }
 
-  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+  if (
+    event.status === "finished" ||
+    event.status === "completed" ||
+    event.status === "completed_unsaved" ||
+    event.status === "cancelled" ||
+    event.status === "archived"
+  ) {
     throw new Error("이미 종료된 이벤트입니다.");
   }
 
@@ -1317,7 +1380,8 @@ export async function finalizeRound(eventId: string, roundNumber: number): Promi
       rounds: nextRounds,
       stats,
       notifications,
-      status: (allCompleted ? "finished" : "in_progress") as EventRecord["status"],
+      status: (allCompleted ? "completed_unsaved" : "in_progress") as EventRecord["status"],
+      finishedAt: allCompleted ? new Date().toISOString() : currentEvent.finishedAt ?? null,
     });
   });
 }
@@ -2231,7 +2295,13 @@ export function getReturnableParticipant(
     return null;
   }
 
-  if (event.status === "finished" || event.status === "completed" || event.status === "archived") {
+  if (
+    event.status === "finished" ||
+    event.status === "completed" ||
+    event.status === "completed_unsaved" ||
+    event.status === "cancelled" ||
+    event.status === "archived"
+  ) {
     return null;
   }
 
@@ -2276,6 +2346,10 @@ export function getParticipantInstruction(event: EventRecord, participantId: str
   const rounds = safeArray(event?.rounds);
   if (event.status === "waiting" || event.status === "draft" || event.status === "recruiting" || rounds.length === 0) {
     return "대기 중입니다. 호스트가 대진을 생성하면 자동으로 안내됩니다.";
+  }
+
+  if (event.status === "completed_unsaved" || event.status === "cancelled") {
+    return "이 이벤트는 종료되었습니다.";
   }
 
   const currentRound = getCurrentRound(event);
@@ -2332,7 +2406,42 @@ export async function markEventSaved(
     isSaved: input.isSaved,
     savedAt: input.savedAt ?? null,
     savedByUserId: input.savedByUserId ?? null,
+    status: (input.isSaved ? "finished" : event.status) as EventRecord["status"],
+    finishedAt: input.isSaved ? input.savedAt ?? new Date().toISOString() : event.finishedAt ?? null,
   }));
+}
+
+export async function cancelEvent(eventId: string): Promise<EventRecord | null> {
+  const nextEvent = await updateEvent(eventId, (event) => ({
+    ...event,
+    status: "cancelled",
+    finishedAt: new Date().toISOString(),
+  }));
+
+  if (nextEvent) {
+    await closeEventParticipantSessions(nextEvent, "closed");
+  }
+
+  return nextEvent;
+}
+
+export async function discardEvent(eventId: string): Promise<void> {
+  const event = await loadEvent(eventId);
+  if (!event) {
+    return;
+  }
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase?.from("events").delete().eq("id", eventId)!;
+    if (error && !isMissingSessionSchemaError(error)) {
+      throw formatSupabaseError(error);
+    }
+  }
+
+  const nextEvents = loadCachedEvents().filter((item) => item.id !== eventId);
+  saveCachedEvents(nextEvents);
+  await closeEventParticipantSessions(event, "closed");
 }
 
 export function getInvitationById(event: EventRecord, invitationId: string): Invitation | null {

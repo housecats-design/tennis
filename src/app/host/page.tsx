@@ -2,9 +2,10 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { canCreateClubEvent, getClubById, listMyClubMemberships } from "@/lib/clubs";
-import { createEvent } from "@/lib/events";
+import { cancelEvent, createEvent, discardEvent, findLatestHostEvent, markEventSaved } from "@/lib/events";
+import { saveCompletedEventRecord } from "@/lib/history";
 import { saveLastEvent, saveLastParticipant } from "@/lib/storage";
-import { EventType, RoundViewMode, UserProfile } from "@/lib/types";
+import { EventRecord, EventType, RoundViewMode, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -27,6 +28,19 @@ export default function HostPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [availableClubs, setAvailableClubs] = useState<Array<{ id: string; name: string }>>([]);
+  const [blockingEvent, setBlockingEvent] = useState<EventRecord | null>(null);
+  const [blockingMode, setBlockingMode] = useState<"in_progress" | "completed_unsaved" | null>(null);
+  const [pendingCreatePayload, setPendingCreatePayload] = useState<{
+    eventName: string;
+    hostName: string;
+    matchType: "singles" | "doubles";
+    eventType: EventType;
+    clubId: string | null;
+    courtCount: number;
+    roundCount: number;
+    roundViewMode: RoundViewMode;
+    hostUserId: string;
+  } | null>(null);
 
   useEffect(() => {
     const sync = async () => {
@@ -51,6 +65,31 @@ export default function HostPage() {
 
     void sync();
   }, [router]);
+
+  async function createNextEvent(input: NonNullable<typeof pendingCreatePayload>): Promise<void> {
+    const { event: nextEvent, hostParticipant } = await createEvent({
+      eventName: input.eventName,
+      hostName: input.hostName,
+      matchType: input.matchType,
+      eventType: input.eventType,
+      clubId: input.clubId,
+      courtCount: input.courtCount,
+      roundCount: input.roundCount,
+      roundViewMode: input.roundViewMode,
+      hostUserId: input.hostUserId,
+    });
+
+    saveLastEvent(nextEvent.id);
+    saveLastParticipant(hostParticipant.id);
+    router.push(`/host/event/${nextEvent.id}`);
+  }
+
+  function closeBlockingPrompt(): void {
+    setBlockingEvent(null);
+    setBlockingMode(null);
+    setPendingCreatePayload(null);
+    setSubmitting(false);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -85,7 +124,7 @@ export default function HostPage() {
         roundViewMode,
       });
 
-      const { event: nextEvent, hostParticipant } = await createEvent({
+      const createPayload = {
         eventName,
         hostName,
         matchType,
@@ -95,15 +134,93 @@ export default function HostPage() {
         roundCount,
         roundViewMode,
         hostUserId: profile.id,
-      });
+      } as const;
 
-      saveLastEvent(nextEvent.id);
-      saveLastParticipant(hostParticipant.id);
-      router.push(`/host/event/${nextEvent.id}`);
+      const existingEvent = await findLatestHostEvent(profile.id);
+      if (existingEvent) {
+        if (existingEvent.status === "draft" || existingEvent.status === "recruiting") {
+          await discardEvent(existingEvent.id);
+        } else if (existingEvent.status === "in_progress") {
+          setBlockingEvent(existingEvent);
+          setBlockingMode("in_progress");
+          setPendingCreatePayload(createPayload);
+          return;
+        } else if (existingEvent.status === "completed_unsaved") {
+          setBlockingEvent(existingEvent);
+          setBlockingMode("completed_unsaved");
+          setPendingCreatePayload(createPayload);
+          return;
+        }
+      }
+
+      await createNextEvent(createPayload);
     } catch (submitError) {
       console.error("[host-create] failed", submitError);
       setError(submitError instanceof Error ? submitError.message : "이벤트 생성에 실패했습니다.");
     } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleReturnToExistingEvent(): Promise<void> {
+    if (!blockingEvent) {
+      return;
+    }
+
+    saveLastEvent(blockingEvent.id);
+    const hostParticipant = blockingEvent.participants.find((participant) => participant.role === "host");
+    if (hostParticipant) {
+      saveLastParticipant(hostParticipant.id);
+    }
+    router.push(`/host/event/${blockingEvent.id}`);
+  }
+
+  async function handleCancelAndCreateNext(): Promise<void> {
+    if (!blockingEvent || !pendingCreatePayload) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await cancelEvent(blockingEvent.id);
+      await createNextEvent(pendingCreatePayload);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "이벤트 처리에 실패했습니다.");
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSaveCompletedAndContinue(): Promise<void> {
+    if (!blockingEvent || !pendingCreatePayload || !profile) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const saved = await saveCompletedEventRecord(blockingEvent);
+      await markEventSaved(blockingEvent.id, {
+        isSaved: true,
+        savedAt: saved.savedAt,
+        savedByUserId: profile.id,
+      });
+      await createNextEvent(pendingCreatePayload);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "이벤트 저장에 실패했습니다.");
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDiscardCompletedAndContinue(): Promise<void> {
+    if (!blockingEvent || !pendingCreatePayload) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await discardEvent(blockingEvent.id);
+      await createNextEvent(pendingCreatePayload);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "이벤트 삭제에 실패했습니다.");
       setSubmitting(false);
     }
   }
@@ -249,6 +366,48 @@ export default function HostPage() {
           {submitting ? "생성 중..." : "이벤트 만들기"}
         </button>
       </form>
+
+      {blockingEvent && blockingMode ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4">
+          <div className="w-full max-w-xl border border-line bg-white p-6">
+            <div className="text-2xl font-black">
+              {blockingMode === "in_progress" ? "진행중인 이벤트가 있습니다" : "저장되지 않은 종료 이벤트가 있습니다"}
+            </div>
+            <p className="mt-4 text-sm leading-6 text-ink/72">
+              {blockingMode === "in_progress"
+                ? "기존 이벤트를 아직 마무리하지 않았습니다. 기존 이벤트로 돌아가시겠습니까, 아니면 마무리 후 새 이벤트를 생성하시겠습니까?"
+                : "이전에 종료된 이벤트가 아직 저장되지 않았습니다. 저장하시겠습니까?"}
+            </p>
+            <div className="mt-2 text-xs text-ink/55">
+              현재 이벤트: {blockingEvent.eventName}
+            </div>
+            <div className="mt-6 flex flex-wrap gap-3">
+              {blockingMode === "in_progress" ? (
+                <>
+                  <button type="button" onClick={() => void handleReturnToExistingEvent()} className="poster-button-secondary">
+                    기존 이벤트로 돌아가기
+                  </button>
+                  <button type="button" onClick={() => void handleCancelAndCreateNext()} disabled={submitting} className="poster-button disabled:opacity-60">
+                    {submitting ? "처리 중..." : "마무리 후 새 이벤트 생성"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => void handleSaveCompletedAndContinue()} disabled={submitting} className="poster-button disabled:opacity-60">
+                    {submitting ? "처리 중..." : "저장"}
+                  </button>
+                  <button type="button" onClick={() => void handleDiscardCompletedAndContinue()} disabled={submitting} className="poster-button-secondary disabled:opacity-60">
+                    저장 안 함
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={closeBlockingPrompt} disabled={submitting} className="poster-button-secondary disabled:opacity-60">
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

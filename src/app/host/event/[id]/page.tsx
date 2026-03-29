@@ -8,6 +8,7 @@ import {
   canEditParticipants,
   createMemberInvitations,
   deleteFutureRound,
+  discardEvent,
   finalizeRound,
   forceCloseRound,
   generateEventSchedule,
@@ -207,7 +208,7 @@ export default function HostEventPage() {
   }, [event?.clubId]);
 
   useEffect(() => {
-    if (!event || (event.status !== "completed" && event.status !== "finished")) {
+    if (!event || !["completed_unsaved", "completed", "finished"].includes(event.status)) {
       setFinalRanking([]);
       return;
     }
@@ -605,13 +606,9 @@ export default function HostEventPage() {
     }
 
     if (!shouldSave) {
-      const nextEvent = await markEventSaved(event.id, {
-        isSaved: false,
-        savedAt: null,
-        savedByUserId: null,
-      });
-      setEvent(nextEvent);
-      setSaveInfo("이벤트를 저장하지 않도록 설정했습니다.");
+      await discardEvent(event.id);
+      window.alert("이벤트를 저장하지 않고 폐기했습니다.");
+      router.replace("/host");
       return;
     }
 
@@ -951,7 +948,7 @@ export default function HostEventPage() {
             </section>
           ) : null}
 
-          {event.status === "completed" || event.status === "finished" ? (
+          {["completed_unsaved", "completed", "finished"].includes(event.status) ? (
             <section className="border-t border-line py-6">
               <div className="mb-5 flex flex-wrap gap-3">
                 <Link href="/" className="poster-button-secondary">
@@ -969,13 +966,19 @@ export default function HostEventPage() {
                 ))}
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
-                <div className="w-full text-sm font-semibold text-ink/75">이 이벤트를 저장할까요?</div>
-                <button type="button" onClick={() => void handleSaveDecision(true)} className="poster-button">
-                  저장
-                </button>
-                <button type="button" onClick={() => void handleSaveDecision(false)} className="poster-button-secondary">
-                  저장 안 함
-                </button>
+                {event.status === "completed_unsaved" ? (
+                  <>
+                    <div className="w-full text-sm font-semibold text-ink/75">이벤트가 종료되었습니다. 기록을 저장하시겠습니까?</div>
+                    <button type="button" onClick={() => void handleSaveDecision(true)} className="poster-button">
+                      저장
+                    </button>
+                    <button type="button" onClick={() => void handleSaveDecision(false)} className="poster-button-secondary">
+                      저장 안 함
+                    </button>
+                  </>
+                ) : (
+                  <div className="w-full text-sm font-semibold text-ink/75">저장된 이벤트 결과입니다.</div>
+                )}
                 <Link href={`/event/${event.id}/leaderboard`} className="poster-button-secondary">
                   전체 랭킹 보기
                 </Link>

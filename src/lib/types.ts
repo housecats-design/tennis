@@ -1,6 +1,6 @@
 export type MatchType = "singles" | "doubles";
 export type RoundViewMode = "progressive" | "full";
-export type EventStatus = "draft" | "waiting" | "recruiting" | "in_progress" | "completed" | "finished" | "archived";
+export type EventStatus = "draft" | "waiting" | "recruiting" | "in_progress" | "completed_unsaved" | "completed" | "finished" | "cancelled" | "archived";
 export type ParticipantRole = "host" | "guest";
 export type ParticipantGender = "male" | "female" | "other" | "unspecified";
 export type SkillLevel = "high" | "medium" | "low";
