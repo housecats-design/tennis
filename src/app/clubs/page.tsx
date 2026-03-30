@@ -22,12 +22,14 @@ export default function ClubsPage() {
   const [region, setRegion] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(true);
+  const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
+      let shouldKeepLoading = false;
       try {
         const nextProfile = await getCurrentProfile();
         const nextClubs = await listActiveClubs();
@@ -44,12 +46,16 @@ export default function ClubsPage() {
             (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
           );
           if (hasApprovedClub) {
+            shouldKeepLoading = true;
+            setRedirecting(true);
             router.replace("/clubs/home");
             return;
           }
         }
       } finally {
-        setLoading(false);
+        if (!shouldKeepLoading) {
+          setLoading(false);
+        }
       }
     };
 
@@ -93,8 +99,8 @@ export default function ClubsPage() {
 
   const myClubs = clubs.filter((club) => joinedClubIds.has(club.id));
 
-  if (loading) {
-    return <main className="poster-page max-w-5xl text-sm text-ink/70">클럽 정보를 불러오는 중...</main>;
+  if (loading || redirecting) {
+    return <main className="poster-page max-w-5xl text-sm text-ink/70">클럽 화면을 불러오는 중...</main>;
   }
 
   return (
