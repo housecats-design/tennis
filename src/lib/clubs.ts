@@ -8,6 +8,7 @@ import {
   ClubMember,
   ClubMembershipStatus,
   ClubRole,
+  ClubVisibility,
   UserProfile,
 } from "@/lib/types";
 import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase";
@@ -26,6 +27,7 @@ type ClubRow = {
   club_name: string;
   region?: string | null;
   description?: string | null;
+  visibility?: string | null;
   created_by_user_id: string;
   status?: string | null;
   approved_by?: string | null;
@@ -151,12 +153,17 @@ function normalizeClubRole(role?: string | null): ClubRole {
   return role === "leader" || role === "vice_leader" ? role : "member";
 }
 
+function normalizeClubVisibility(visibility?: string | null): ClubVisibility {
+  return visibility === "private" ? "private" : "public";
+}
+
 export function normalizeClub(club: Partial<Club> & Pick<Club, "id" | "clubName" | "createdByUserId">): Club {
   return {
     id: club.id,
     clubName: normalizeClubName(club.clubName),
     region: normalizeClubRegion(club.region),
     description: club.description ?? null,
+    visibility: normalizeClubVisibility(club.visibility),
     createdByUserId: club.createdByUserId,
     status: normalizeClubStatus(club.status),
     approvedBy: club.approvedBy ?? null,
@@ -263,11 +270,13 @@ export function canCreateClubEvent(role: ClubRole): boolean {
 }
 
 export async function listMyApprovedClubs(userId: string): Promise<Array<{ club: Club; membership: ClubMember }>> {
-  const [memberships, clubs] = await Promise.all([listMyClubMemberships(userId), listActiveClubs()]);
-  const clubMap = new Map(clubs.map((club) => [club.id, club]));
-  return memberships
-    .filter((membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null)
-    .map((membership) => ({ club: clubMap.get(membership.clubId), membership }))
+  const memberships = await listMyClubMemberships(userId);
+  const approvedMemberships = memberships.filter(
+    (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
+  );
+  const clubs = await Promise.all(approvedMemberships.map((membership) => getClubById(membership.clubId)));
+  return approvedMemberships
+    .map((membership, index) => ({ club: clubs[index], membership }))
     .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club));
 }
 
@@ -646,22 +655,29 @@ export async function updateClubMemberRole(input: {
 
 export async function listActiveClubs(): Promise<Club[]> {
   if (!isSupabaseEnabled()) {
-    return loadCachedClubs().filter((club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending");
+    return loadCachedClubs().filter(
+      (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+    );
   }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("clubs")
-    .select("id, club_name, region, description, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
     .is("deleted_at", null)
     .in("status", ["active", "approved"])
+    .eq("visibility", "public")
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
     if (shouldFallbackToLocal(error)) {
-      return loadCachedClubs().filter((club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending");
+      return loadCachedClubs().filter(
+        (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+      );
     }
-    return loadCachedClubs().filter((club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending");
+    return loadCachedClubs().filter(
+      (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+    );
   }
 
   const clubs = data.map((row) =>
@@ -670,6 +686,7 @@ export async function listActiveClubs(): Promise<Club[]> {
       clubName: (row as ClubRow).club_name,
       region: (row as ClubRow).region ?? null,
       description: (row as ClubRow).description ?? null,
+      visibility: normalizeClubVisibility((row as ClubRow).visibility),
       createdByUserId: (row as ClubRow).created_by_user_id,
       status: normalizeClubStatus((row as ClubRow).status),
       approvedBy: (row as ClubRow).approved_by ?? null,
@@ -689,8 +706,84 @@ export async function getClubById(clubId: string): Promise<Club | null> {
     return null;
   }
 
-  const activeClubs = await listActiveClubs();
-  return activeClubs.find((club) => club.id === clubId) ?? loadCachedClubs().find((club) => club.id === clubId) ?? null;
+  if (!isSupabaseEnabled()) {
+    return loadCachedClubs().find((club) => club.id === clubId) ?? null;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase!
+    .from("clubs")
+    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .eq("id", clubId)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedClubs().find((club) => club.id === clubId) ?? null;
+    }
+    return loadCachedClubs().find((club) => club.id === clubId) ?? null;
+  }
+
+  const club = normalizeClub({
+    id: (data as ClubRow).id,
+    clubName: (data as ClubRow).club_name,
+    region: (data as ClubRow).region ?? null,
+    description: (data as ClubRow).description ?? null,
+    visibility: normalizeClubVisibility((data as ClubRow).visibility),
+    createdByUserId: (data as ClubRow).created_by_user_id,
+    status: normalizeClubStatus((data as ClubRow).status),
+    approvedBy: (data as ClubRow).approved_by ?? null,
+    approvedAt: (data as ClubRow).approved_at ?? null,
+    isActive: (data as ClubRow).is_active ?? true,
+    deletedAt: (data as ClubRow).deleted_at ?? null,
+    createdAt: (data as ClubRow).created_at ?? new Date().toISOString(),
+    updatedAt: (data as ClubRow).updated_at ?? new Date().toISOString(),
+  });
+
+  const cached = loadCachedClubs().filter((item) => item.id !== club.id);
+  cacheClubs([club, ...cached]);
+  return club;
+}
+
+export async function updateClubVisibility(input: {
+  clubId: string;
+  actorUserId: string;
+  visibility: ClubVisibility;
+}): Promise<Club> {
+  const actorMembership = await getClubMembership(input.clubId, input.actorUserId);
+  if (!actorMembership || actorMembership.membershipStatus !== "approved" || actorMembership.role !== "leader") {
+    throw new Error("클럽 공개 여부를 변경할 권한이 없습니다.");
+  }
+
+  const currentClub = await getClubById(input.clubId);
+  if (!currentClub) {
+    throw new Error("클럽을 찾을 수 없습니다.");
+  }
+
+  const nextClub = normalizeClub({
+    ...currentClub,
+    visibility: input.visibility,
+    updatedAt: new Date().toISOString(),
+  });
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase!
+      .from("clubs")
+      .update({
+        visibility: nextClub.visibility,
+        updated_at: nextClub.updatedAt,
+      })
+      .eq("id", input.clubId);
+
+    if (error && !shouldFallbackToLocal(error)) {
+      throw new Error(error.message);
+    }
+  }
+
+  const cached = loadCachedClubs().filter((club) => club.id !== input.clubId);
+  cacheClubs([nextClub, ...cached]);
+  return nextClub;
 }
 
 export async function listMyClubMemberships(userId: string): Promise<ClubMember[]> {

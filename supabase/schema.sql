@@ -221,6 +221,7 @@ create table if not exists club_applications (
 
 alter table clubs add column if not exists region text;
 alter table clubs add column if not exists status text default 'active';
+alter table clubs add column if not exists visibility text default 'public';
 alter table clubs add column if not exists approved_by text;
 alter table clubs add column if not exists approved_at timestamptz;
 

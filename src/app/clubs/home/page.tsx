@@ -135,6 +135,7 @@ export default function ClubHomePage() {
               <div className="mt-3 text-sm text-ink/68">
                 {clubData.club.region ? `${clubData.club.region} · ` : ""}{clubData.club.description ?? "클럽 소개가 아직 없습니다."}
               </div>
+              <div className="mt-2 text-xs text-ink/55">클럽 공개 여부: {clubData.club.visibility === "private" ? "비공개" : "공개"}</div>
               <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink/55">
                 <span>홈</span>
                 <span>· 멤버</span>

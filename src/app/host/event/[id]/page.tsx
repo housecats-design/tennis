@@ -10,6 +10,7 @@ import {
   deleteFutureRound,
   discardEvent,
   finalizeRound,
+  forceEndEvent,
   forceCloseRound,
   generateEventSchedule,
   getJoinUrl,
@@ -18,7 +19,6 @@ import {
   markEventSaved,
   reassignRound,
   reassignSingleMatch,
-  respondToScoreProposal,
   saveParticipants,
   skipMatch,
   subscribeToEvent,
@@ -180,10 +180,15 @@ export default function HostEventPage() {
     const availableUserIds = new Set(availableMembers.map((member) => member.id));
     return recommendedMembers.filter((member) => availableUserIds.has(member.userId) && !invitedUserIds.has(member.userId));
   }, [availableMembers, event?.invitations, recommendedMembers]);
-  const hostParticipantId = useMemo(
-    () => event?.participants.find((participant) => participant.role === "host")?.id ?? null,
-    [event],
-  );
+  const participantSummary = useMemo(() => {
+    const participants = event?.participants ?? [];
+    return {
+      total: participants.length,
+      male: participants.filter((participant) => participant.gender === "male").length,
+      female: participants.filter((participant) => participant.gender === "female").length,
+      unspecified: participants.filter((participant) => participant.gender !== "male" && participant.gender !== "female").length,
+    };
+  }, [event?.participants]);
 
   async function refreshEvent(): Promise<void> {
     if (!eventId) {
@@ -591,15 +596,6 @@ export default function HostEventPage() {
     setEvent(nextEvent);
   }
 
-  async function handleHostProposalResponse(roundNumber: number, matchId: string, response: "accept" | "dispute"): Promise<void> {
-    if (!event || !hostParticipantId) {
-      return;
-    }
-
-    const nextEvent = await respondToScoreProposal(event.id, roundNumber, matchId, hostParticipantId, response);
-    setEvent(nextEvent);
-  }
-
   async function handleSaveDecision(shouldSave: boolean): Promise<void> {
     if (!event || !profile) {
       return;
@@ -620,6 +616,21 @@ export default function HostEventPage() {
     });
     setEvent(nextEvent);
     setSaveInfo("이벤트를 저장했습니다. 호스트 이력과 플레이어 내 기록에서 확인할 수 있습니다.");
+  }
+
+  async function handleForceEndEvent(): Promise<void> {
+    if (!event) {
+      return;
+    }
+
+    const confirmed = window.confirm("이벤트를 강제 종료할까요?\n지금 종료하면 이 이벤트는 저장되지 않습니다.");
+    if (!confirmed) {
+      return;
+    }
+
+    const nextEvent = await forceEndEvent(event.id);
+    setEvent(nextEvent);
+    setSaveInfo("이벤트를 강제 종료했습니다. 이 이벤트는 공식 기록으로 저장되지 않습니다.");
   }
 
   if (loading) {
@@ -672,6 +683,11 @@ export default function HostEventPage() {
           <button type="button" onClick={refreshEvent} className="poster-button-secondary">
             새로고침
           </button>
+          {event.status === "in_progress" ? (
+            <button type="button" onClick={() => void handleForceEndEvent()} className="poster-button-secondary">
+              강제 종료
+            </button>
+          ) : null}
           <Link href={`/host/event/${event.id}/rounds`} className="poster-button-secondary">
             라운드 전체보기
           </Link>
@@ -705,6 +721,13 @@ export default function HostEventPage() {
             <span className="rounded-full bg-surface px-3 py-1 text-xs font-semibold text-ink/65">
               {event.participants.length}명
             </span>
+          </div>
+
+          <div className="mb-5 grid gap-2 border-b border-line pb-4 text-sm text-ink/72 sm:grid-cols-2">
+            <div>참가자: {participantSummary.total}명</div>
+            <div>남자: {participantSummary.male}명</div>
+            <div>여자: {participantSummary.female}명</div>
+            <div>미설정: {participantSummary.unspecified}명</div>
           </div>
 
           <div className="space-y-3">
@@ -1135,31 +1158,13 @@ export default function HostEventPage() {
                         </select>
                       </label>
                     </div>
-                    {match.scoreProposal ? (
+                    {match.scoreProposal?.status === "disputed" ? (
                       <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
-                        match.scoreProposal.status === "disputed"
-                          ? "border-red-200 bg-red-50 text-red-700"
-                          : "border-amber-200 bg-amber-50 text-amber-900"
+                        "border-red-200 bg-red-50 text-red-700"
                       }`}>
                         제출 점수 {match.scoreProposal.scoreA}:{match.scoreProposal.scoreB} /
-                        상태 {match.scoreProposal.status === "pending" ? "확인 대기" : match.scoreProposal.status === "accepted" ? "확정" : "이의신청"}
+                        상태 이의신청
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleHostProposalResponse(round.roundNumber, match.id ?? "", "accept")}
-                            disabled={round.completed}
-                            className="border border-accentStrong px-3 py-2 text-xs font-semibold text-accentStrong disabled:opacity-50"
-                          >
-                            수락
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleHostProposalResponse(round.roundNumber, match.id ?? "", "dispute")}
-                            disabled={round.completed}
-                            className="border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
-                          >
-                            이의신청
-                          </button>
                           <button
                             type="button"
                             onClick={() => handleApplyProposal(round.roundNumber, match.id ?? "", match.scoreProposal?.scoreA ?? 0, match.scoreProposal?.scoreB ?? 0)}

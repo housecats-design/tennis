@@ -11,6 +11,7 @@ import {
   listMyClubMemberships,
   listPendingClubJoinRequests,
   submitClubJoinRequest,
+  updateClubVisibility,
   updateClubJoinRequestStatus,
   updateClubMemberRole,
 } from "@/lib/clubs";
@@ -34,6 +35,7 @@ export default function ClubDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [visibilityDraft, setVisibilityDraft] = useState<"public" | "private">("public");
 
   useEffect(() => {
     const load = async () => {
@@ -41,6 +43,7 @@ export default function ClubDetailPage() {
         const [nextProfile, nextClub] = await Promise.all([getCurrentProfile(), getClubById(clubId)]);
         setProfile(nextProfile);
         setClub(nextClub);
+        setVisibilityDraft(nextClub?.visibility === "private" ? "private" : "public");
         const [nextClubMembers, nextProfiles] = await Promise.all([
           listClubMembers(clubId),
           listProfiles(),
@@ -160,6 +163,29 @@ export default function ClubDetailPage() {
     }
   }
 
+  async function handleVisibilityChange(): Promise<void> {
+    if (!profile || !club) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const nextClub = await updateClubVisibility({
+        clubId,
+        actorUserId: profile.id,
+        visibility: visibilityDraft,
+      });
+      setClub(nextClub);
+      setInfo(visibilityDraft === "public" ? "클럽을 공개로 변경했습니다." : "클럽을 비공개로 변경했습니다.");
+    } catch (visibilityError) {
+      setError(visibilityError instanceof Error ? visibilityError.message : "클럽 공개 여부 변경에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (loading) {
     return <main className="poster-page max-w-4xl text-sm text-ink/70">클럽 정보를 불러오는 중...</main>;
   }
@@ -194,6 +220,7 @@ export default function ClubDetailPage() {
           {club.region ? `${club.region} · ` : ""}{club.description ?? "클럽 소개가 아직 없습니다."}
         </p>
         <div className="mt-4 text-xs text-ink/55">상태: {club.status === "approved" ? "승인됨" : club.status === "active" ? "운영중" : club.status}</div>
+        <div className="mt-1 text-xs text-ink/55">클럽 공개 여부: {club.visibility === "private" ? "비공개" : "공개"}</div>
         <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink/55">
           <span>홈</span>
           <span>· 멤버</span>
@@ -257,6 +284,27 @@ export default function ClubDetailPage() {
           <div className="mt-4 text-xs font-semibold text-accentStrong">이 계정은 클럽 이벤트를 만들 수 있는 운영 권한이 있습니다.</div>
         ) : null}
       </section>
+
+      {currentClubMembership?.role === "leader" ? (
+        <section className="border-t border-line py-8">
+          <h2 className="text-2xl font-black">클럽 설정</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-[220px_auto] sm:items-end">
+            <label className="grid gap-2 text-sm font-semibold">
+              클럽 공개 여부
+              <select value={visibilityDraft} onChange={(event) => setVisibilityDraft(event.target.value as "public" | "private")} className="poster-input">
+                <option value="public">공개</option>
+                <option value="private">비공개</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => void handleVisibilityChange()} disabled={submitting} className="poster-button-secondary disabled:opacity-60">
+                {submitting ? "저장 중..." : "설정 저장"}
+              </button>
+              <div className="text-xs text-ink/55">비공개 클럽은 클럽 탐색 목록에 노출되지 않습니다.</div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {canApproveRequests ? (
         <section className="border-t border-line py-8">

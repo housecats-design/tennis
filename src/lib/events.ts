@@ -273,50 +273,48 @@ function isMissingSessionSchemaError(error: { code?: string; message?: string } 
   return error?.code === "PGRST205" || message.includes("schema cache") || message.includes("does not exist");
 }
 
-function findCurrentMatchForParticipant(event: EventRecord, participantId: string): Match | null {
-  const currentRound = getCurrentRound(event);
-  if (!currentRound) {
-    return null;
+function findNextMatchAssignment(
+  event: EventRecord,
+  participantId: string,
+): { round: Round; match: Match } | null {
+  for (const round of safeArray(event.rounds)) {
+    if (round.completed) {
+      continue;
+    }
+
+    const match = safeArray(round.matches).find(
+      (currentMatch) =>
+        !currentMatch.skipped &&
+        !currentMatch.completed &&
+        [...safeArray(currentMatch.teamA), ...safeArray(currentMatch.teamB)].some((player) => player.id === participantId),
+    );
+    if (match) {
+      return { round, match };
+    }
   }
 
-  return (
-    safeArray(currentRound.matches).find((match) =>
-      !match.skipped &&
-      [...safeArray(match.teamA), ...safeArray(match.teamB)].some((player) => player.id === participantId),
-    ) ?? null
-  );
+  return null;
+}
+
+function findCurrentMatchForParticipant(event: EventRecord, participantId: string): Match | null {
+  return findNextMatchAssignment(event, participantId)?.match ?? null;
 }
 
 function isParticipantActionRequired(event: EventRecord, participant: Participant): boolean {
-  const currentRound = getCurrentRound(event);
-  if (!currentRound || currentRound.completed) {
+  const assignment = findNextMatchAssignment(event, participant.id);
+  if (!assignment) {
     return false;
   }
 
-  const currentMatch = findCurrentMatchForParticipant(event, participant.id);
-  if (!currentMatch) {
-    return false;
-  }
-
-  if (!currentMatch.scoreProposal) {
+  if (!Number.isInteger(assignment.match.scoreA) || !Number.isInteger(assignment.match.scoreB)) {
     return true;
   }
 
-  if (currentMatch.scoreProposal.status === "disputed") {
+  if (assignment.match.scoreProposal?.status === "disputed") {
     return false;
   }
 
-  const alreadyAccepted = safeArray(currentMatch.scoreProposal.acceptedByParticipantIds).includes(participant.id);
-  const alreadyDisputed = safeArray(currentMatch.scoreProposal.disputedByParticipantIds).includes(participant.id);
-  if (alreadyAccepted || alreadyDisputed) {
-    return false;
-  }
-
-  if (currentMatch.scoreProposal.submittedByParticipantId === participant.id) {
-    return false;
-  }
-
-  return isConfirmationRequiredParticipant(event, participant.id);
+  return false;
 }
 
 function resolveParticipantSessionStatus(event: EventRecord, participant: Participant): ParticipantActiveSessionStatus {
@@ -367,8 +365,7 @@ function buildParticipantSession(event: EventRecord, participant: Participant): 
     return null;
   }
 
-  const currentRound = getCurrentRound(event);
-  const currentMatch = findCurrentMatchForParticipant(event, participant.id);
+  const assignment = findNextMatchAssignment(event, participant.id);
   const sessionStatus = resolveParticipantSessionStatus(event, participant);
 
   return {
@@ -376,8 +373,8 @@ function buildParticipantSession(event: EventRecord, participant: Participant): 
     eventId: event.id,
     participantId: participant.id,
     userId: participant.userId,
-    currentRoundId: currentRound?.id ?? null,
-    currentMatchId: currentMatch?.id ?? null,
+    currentRoundId: assignment?.round.id ?? null,
+    currentMatchId: assignment?.match.id ?? null,
     sessionStatus,
     lastSeenAt: new Date().toISOString(),
     expiresAt: resolveSessionExpiry(sessionStatus),
@@ -862,7 +859,7 @@ function currentRoundState(round: Round): RoundState {
     return "disputed";
   }
 
-  if (round.matches.some((match) => match.scoreProposal)) {
+  if (round.matches.some((match) => Number.isInteger(match.scoreA) && Number.isInteger(match.scoreB))) {
     return "score_pending";
   }
 
@@ -1230,9 +1227,29 @@ export async function saveParticipants(eventId: string, participants: Participan
   }));
 
   return updateEvent(eventId, (event) => {
+    const participantIds = new Set(normalizedParticipants.map((participant) => participant.id));
     const nextEvent = {
       ...event,
       participants: normalizedParticipants,
+      rounds: safeArray(event.rounds).map((round) => ({
+        ...round,
+        restPlayers: safeArray(round.restPlayers).filter((player) => participantIds.has(player.id)),
+        matches: safeArray(round.matches).map((match) => {
+          const nextTeamA = safeArray(match.teamA).filter((player) => participantIds.has(player.id));
+          const nextTeamB = safeArray(match.teamB).filter((player) => participantIds.has(player.id));
+          const expectedTeamSize = event.matchType === "singles" ? 1 : 2;
+          const invalidMatch = nextTeamA.length < expectedTeamSize || nextTeamB.length < expectedTeamSize;
+          return {
+            ...match,
+            teamA: nextTeamA,
+            teamB: nextTeamB,
+            skipped: invalidMatch ? true : match.skipped,
+            scoreA: invalidMatch ? null : match.scoreA ?? null,
+            scoreB: invalidMatch ? null : match.scoreB ?? null,
+            scoreProposal: invalidMatch ? null : match.scoreProposal ?? null,
+          };
+        }),
+      })),
       stats: createStatsRecord(buildPlayers(normalizedParticipants)),
     };
 
@@ -1241,6 +1258,10 @@ export async function saveParticipants(eventId: string, participants: Participan
       stats: calculateEventStats(nextEvent),
     };
   });
+}
+
+export async function forceEndEvent(eventId: string): Promise<EventRecord | null> {
+  return cancelEvent(eventId);
 }
 
 export async function generateEventSchedule(eventId: string): Promise<EventRecord | null> {
@@ -1294,34 +1315,12 @@ function isValidScore(scoreA: number | null | undefined, scoreB: number | null |
   );
 }
 
-function hasConfirmedNonStandardScore(match: Round["matches"][number]): boolean {
-  return Boolean(
-    match.scoreProposal?.status === "accepted" &&
-    Number.isInteger(match.scoreA) &&
-    Number.isInteger(match.scoreB),
-  );
-}
-
 function canFinalizeMatch(match: Round["matches"][number]): boolean {
   if (match.skipped) {
     return true;
   }
 
-  return isValidScore(match.scoreA, match.scoreB) || hasConfirmedNonStandardScore(match);
-}
-
-function getMatchParticipantIds(round: Round, matchId: string): string[] {
-  const match = safeArray(round.matches).find((item) => item.id === matchId);
-  if (!match) {
-    return [];
-  }
-
-  return [...safeArray(match.teamA), ...safeArray(match.teamB)].map((player) => player.id);
-}
-
-function isConfirmationRequiredParticipant(event: EventRecord, participantId: string): boolean {
-  const participant = safeArray(event.participants).find((item) => item.id === participantId);
-  return Boolean(participant && participant.userId && (participant.source === "joined" || participant.source === "host"));
+  return isValidScore(match.scoreA, match.scoreB);
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -1442,35 +1441,52 @@ export async function submitMatchScoreProposal(
   participantId: string,
   scores: { scoreA: number; scoreB: number },
 ): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) =>
-    withDerivedEventState({
-      ...event,
-      rounds: event.rounds.map((round) =>
+  return updateEvent(eventId, (event) => {
+    const nextRounds = event.rounds.map((round) =>
         round.roundNumber === roundNumber
-          ? {
-              ...round,
-              state: "score_pending",
-              matches: round.matches.map((match) =>
-                match.id === matchId
-                  ? {
-                      ...match,
-                      scoreProposal: {
-                        scoreA: scores.scoreA,
-                        scoreB: scores.scoreB,
-                        submittedByParticipantId: participantId,
-                        submittedAt: new Date().toISOString(),
-                        acceptedByParticipantIds: [],
-                        disputedByParticipantIds: [],
-                        status: "pending",
-                      },
-                    }
-                  : match,
-              ),
-            }
-          : round,
-      ),
-    }),
-  );
+        ? {
+            ...round,
+            state: "score_pending" as const,
+            matches: round.matches.map((match) =>
+              match.id === matchId
+                ? {
+                    ...match,
+                    scoreA: scores.scoreA,
+                    scoreB: scores.scoreB,
+                    isTieBreak:
+                      (scores.scoreA === 6 && scores.scoreB === 5) ||
+                      (scores.scoreA === 5 && scores.scoreB === 6),
+                    scoreProposal: {
+                      scoreA: scores.scoreA,
+                      scoreB: scores.scoreB,
+                      submittedByParticipantId: participantId,
+                      submittedAt: new Date().toISOString(),
+                      acceptedByParticipantIds: [participantId],
+                      disputedByParticipantIds: [],
+                      comments: [],
+                      status: "accepted" as const,
+                    },
+                  }
+                : match,
+            ),
+          }
+        : round,
+    );
+
+    return withDerivedEventState({
+      ...event,
+      rounds: nextRounds,
+      notifications: [
+        ...event.notifications,
+        createEventNotification({
+          eventId,
+          roundNumber,
+          message: "점수가 등록되었습니다.",
+          type: "success",
+        }),
+      ],
+    });
+  });
 }
 
 export async function respondToScoreProposal(
@@ -1481,6 +1497,10 @@ export async function respondToScoreProposal(
   response: "accept" | "dispute",
   reason?: string | null,
 ): Promise<EventRecord | null> {
+  if (response === "accept") {
+    return loadEvent(eventId);
+  }
+
   const nextEvent = await updateEvent(eventId, (event) => {
     const hostParticipant = safeArray(event.participants).find((participant) => participant.role === "host");
     const actorParticipant = safeArray(event.participants).find((participant) => participant.id === participantId);
@@ -1502,7 +1522,7 @@ export async function respondToScoreProposal(
                 roundNumber,
                 targetParticipantId: hostParticipant.id,
                 targetUserId: hostParticipant.userId ?? null,
-                message: `점수 이의신청 발생: Round ${roundNumber}, Match ${matchId}`,
+                message: `${roundNumber}라운드 경기에서 점수 이의신청이 발생했습니다.`,
                 type: "dispute",
                 metadata: {
                   matchId,
@@ -1517,7 +1537,6 @@ export async function respondToScoreProposal(
           return round;
         }
 
-        const participantIds = getMatchParticipantIds(round, matchId);
         return {
           ...round,
           state: currentRoundState({
@@ -1527,40 +1546,16 @@ export async function respondToScoreProposal(
                 return match;
               }
 
-              const acceptedByParticipantIds =
-                response === "accept"
-                  ? Array.from(new Set([...match.scoreProposal.acceptedByParticipantIds, participantId]))
-                  : match.scoreProposal.acceptedByParticipantIds;
-
               const disputedByParticipantIds =
                 response === "dispute"
                   ? Array.from(new Set([...match.scoreProposal.disputedByParticipantIds, participantId]))
                   : match.scoreProposal.disputedByParticipantIds;
 
-              const requiredAcceptCount =
-                participantIds.length >= 4
-                  ? 3
-                  : Math.max(
-                      participantIds.filter(
-                        (id) =>
-                          id !== match.scoreProposal?.submittedByParticipantId &&
-                          isConfirmationRequiredParticipant(event, id),
-                      ).length,
-                      0,
-                    );
-              const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
-
               return {
                 ...match,
-                scoreA: accepted ? match.scoreProposal.scoreA : match.scoreA ?? null,
-                scoreB: accepted ? match.scoreProposal.scoreB : match.scoreB ?? null,
-                isTieBreak:
-                  accepted &&
-                  ((match.scoreProposal.scoreA === 6 && match.scoreProposal.scoreB === 5) ||
-                    (match.scoreProposal.scoreA === 5 && match.scoreProposal.scoreB === 6)),
                 scoreProposal: {
                   ...match.scoreProposal,
-                  acceptedByParticipantIds,
+                  acceptedByParticipantIds: safeArray(match.scoreProposal.acceptedByParticipantIds),
                   disputedByParticipantIds,
                   comments:
                     response === "dispute"
@@ -1573,7 +1568,7 @@ export async function respondToScoreProposal(
                           },
                         ]
                       : safeArray(match.scoreProposal.comments),
-                  status: disputedByParticipantIds.length > 0 ? "disputed" : accepted ? "accepted" : "pending",
+                  status: disputedByParticipantIds.length > 0 ? "disputed" : "accepted",
                 },
               };
             }),
@@ -1583,40 +1578,16 @@ export async function respondToScoreProposal(
               return match;
             }
 
-            const acceptedByParticipantIds =
-              response === "accept"
-                ? Array.from(new Set([...match.scoreProposal.acceptedByParticipantIds, participantId]))
-                : match.scoreProposal.acceptedByParticipantIds;
-
             const disputedByParticipantIds =
               response === "dispute"
                 ? Array.from(new Set([...match.scoreProposal.disputedByParticipantIds, participantId]))
                 : match.scoreProposal.disputedByParticipantIds;
 
-            const requiredAcceptCount =
-              participantIds.length >= 4
-                ? 3
-                : Math.max(
-                    participantIds.filter(
-                      (id) =>
-                        id !== match.scoreProposal?.submittedByParticipantId &&
-                        isConfirmationRequiredParticipant(event, id),
-                    ).length,
-                    0,
-                  );
-            const accepted = acceptedByParticipantIds.length >= requiredAcceptCount && disputedByParticipantIds.length === 0;
-
             return {
               ...match,
-              scoreA: accepted ? match.scoreProposal.scoreA : match.scoreA ?? null,
-              scoreB: accepted ? match.scoreProposal.scoreB : match.scoreB ?? null,
-              isTieBreak:
-                accepted &&
-                ((match.scoreProposal.scoreA === 6 && match.scoreProposal.scoreB === 5) ||
-                  (match.scoreProposal.scoreA === 5 && match.scoreProposal.scoreB === 6)),
               scoreProposal: {
                 ...match.scoreProposal,
-                acceptedByParticipantIds,
+                acceptedByParticipantIds: safeArray(match.scoreProposal.acceptedByParticipantIds),
                 disputedByParticipantIds,
                 comments:
                   response === "dispute"
@@ -1629,7 +1600,7 @@ export async function respondToScoreProposal(
                         },
                       ]
                     : safeArray(match.scoreProposal.comments),
-                status: disputedByParticipantIds.length > 0 ? "disputed" : accepted ? "accepted" : "pending",
+                status: disputedByParticipantIds.length > 0 ? "disputed" : "accepted",
               },
             };
           }),
@@ -1651,11 +1622,6 @@ export async function respondToScoreProposal(
 
   if (!nextEvent) {
     return null;
-  }
-
-  const updatedRound = safeArray(nextEvent.rounds).find((round) => round.roundNumber === roundNumber);
-  if (updatedRound && !updatedRound.completed && updatedRound.matches.every((match) => canFinalizeMatch(match))) {
-    return finalizeRound(eventId, roundNumber);
   }
 
   return nextEvent;
@@ -1720,7 +1686,7 @@ export async function forceCloseRound(
     const nextEvent = {
       ...currentEvent,
       rounds: nextRounds,
-      status: (nextRounds.every((round) => round.completed) ? "finished" : "in_progress") as EventRecord["status"],
+      status: (nextRounds.every((round) => round.completed) ? "completed_unsaved" : "in_progress") as EventRecord["status"],
       notifications: [
         ...notifyRoundCompletion({
           event: currentEvent,
@@ -1863,7 +1829,7 @@ export async function addFutureRound(eventId: string): Promise<EventRecord | nul
           })),
         };
       }),
-      status: ((currentEvent.status === "completed" || currentEvent.status === "finished") ? "in_progress" : currentEvent.status) as EventRecord["status"],
+      status: ((currentEvent.status === "completed" || currentEvent.status === "finished" || currentEvent.status === "completed_unsaved") ? "in_progress" : currentEvent.status) as EventRecord["status"],
     }),
   );
 }
@@ -1903,7 +1869,7 @@ export async function deleteFutureRound(eventId: string, roundNumber: number): P
       ...currentEvent,
       roundCount: Math.max(0, currentEvent.roundCount - 1),
       rounds: [...preservedRounds, ...remainingFutureRounds],
-      status: ([...preservedRounds, ...remainingFutureRounds].every((round) => round.completed) ? "finished" : "in_progress") as EventRecord["status"],
+      status: ([...preservedRounds, ...remainingFutureRounds].every((round) => round.completed) ? "completed_unsaved" : "in_progress") as EventRecord["status"],
     }),
   );
 }
@@ -2279,8 +2245,8 @@ export async function loadReturnableParticipationSession(
     session: {
       ...session,
       sessionStatus: nextStatus,
-      currentRoundId: getCurrentRound(event)?.id ?? null,
-      currentMatchId: findCurrentMatchForParticipant(event, participant.id)?.id ?? null,
+      currentRoundId: findNextMatchAssignment(event, participant.id)?.round.id ?? null,
+      currentMatchId: findNextMatchAssignment(event, participant.id)?.match.id ?? null,
       expiresAt: resolveSessionExpiry(nextStatus),
       lastSeenAt: new Date().toISOString(),
     },
@@ -2295,13 +2261,7 @@ export function getReturnableParticipant(
     return null;
   }
 
-  if (
-    event.status === "finished" ||
-    event.status === "completed" ||
-    event.status === "completed_unsaved" ||
-    event.status === "cancelled" ||
-    event.status === "archived"
-  ) {
+  if (event.status !== "in_progress") {
     return null;
   }
 
@@ -2326,8 +2286,8 @@ export function getReturnableParticipant(
     return null;
   }
 
-  const currentRound = getCurrentRound(event);
-  if (!currentRound || currentRound.completed) {
+  const assignment = findNextMatchAssignment(event, participant.id);
+  if (!assignment) {
     return null;
   }
 
@@ -2352,21 +2312,19 @@ export function getParticipantInstruction(event: EventRecord, participantId: str
     return "이 이벤트는 종료되었습니다.";
   }
 
-  const currentRound = getCurrentRound(event);
-  if (!currentRound) {
-    return "모든 라운드가 완료되었습니다.";
+  const assignment = findNextMatchAssignment(event, participantId);
+  if (!assignment) {
+    return getCurrentRound(event) ? "현재 배정된 다음 경기가 없습니다. 잠시 대기해 주세요." : "모든 라운드가 완료되었습니다.";
   }
 
-  const match = safeArray(currentRound.matches).find((currentMatch) =>
-    !currentMatch.skipped &&
-    [...safeArray(currentMatch.teamA), ...safeArray(currentMatch.teamB)].some((player) => player.id === participantId),
-  );
-
-  if (!match) {
-    return "이번 라운드는 휴식입니다.";
-  }
-
-  return `다음 경기: ${match.court}번 코트`;
+  const isTeamA = safeArray(assignment.match.teamA).some((player) => player.id === participantId);
+  const teammates = safeArray(isTeamA ? assignment.match.teamA : assignment.match.teamB)
+    .filter((player) => player.id !== participantId)
+    .map((player) => player.name);
+  const opponents = safeArray(isTeamA ? assignment.match.teamB : assignment.match.teamA).map((player) => player.name);
+  const teammateLabel = teammates.length > 0 ? teammates.join(", ") : "없음";
+  const opponentLabel = opponents.length > 0 ? opponents.join(", ") : "없음";
+  return `다음 경기: ${assignment.round.roundNumber}라운드 / ${assignment.match.court}번 코트로 가세요 · 파트너 ${teammateLabel} · 상대팀 ${opponentLabel}`;
 }
 
 export function getRoundInstructions(event: EventRecord): Array<{ participantId: string; name: string; instruction: string }> {

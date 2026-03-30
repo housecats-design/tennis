@@ -12,6 +12,32 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
 
+function findNextMatchContext(event: Awaited<ReturnType<typeof loadEvent>> | null, participantId: string) {
+  if (!event) {
+    return null;
+  }
+
+  for (const round of Array.isArray(event.rounds) ? event.rounds : []) {
+    if (round.completed) {
+      continue;
+    }
+
+    const match = (Array.isArray(round.matches) ? round.matches : []).find(
+      (currentMatch) =>
+        !currentMatch.skipped &&
+        !currentMatch.completed &&
+        [...(Array.isArray(currentMatch.teamA) ? currentMatch.teamA : []), ...(Array.isArray(currentMatch.teamB) ? currentMatch.teamB : [])].some(
+          (player) => player.id === participantId,
+        ),
+    );
+    if (match) {
+      return { round, match };
+    }
+  }
+
+  return null;
+}
+
 function formatNotificationTime(value: string | null | undefined): string {
   if (!value) {
     return "--:--";
@@ -61,31 +87,22 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
   }
 
   const currentRound = getCurrentRound(event);
-  if (!currentRound) {
-    return { title: "이벤트 종료", body: "모든 라운드가 종료되었습니다." };
+  const assignment = findNextMatchContext(event, participantId);
+  if (!assignment) {
+    return currentRound
+      ? { title: `${currentRound.roundNumber}라운드 대기`, body: "현재 배정된 다음 경기가 없습니다. 잠시 대기해 주세요." }
+      : { title: "이벤트 종료", body: "모든 라운드가 종료되었습니다." };
   }
 
-  const matches = Array.isArray(currentRound.matches) ? currentRound.matches : [];
-  const match = matches.find((currentMatch) =>
-    [...(Array.isArray(currentMatch.teamA) ? currentMatch.teamA : []), ...(Array.isArray(currentMatch.teamB) ? currentMatch.teamB : [])].some((player) => player.id === participantId),
-  );
-
-  if (!match) {
-    return {
-      title: `Round ${currentRound.roundNumber}`,
-      body: "이번 라운드는 휴식입니다.",
-    };
-  }
-
-  const isTeamA = match.teamA.some((player) => player.id === participantId);
-  const teammates = (isTeamA ? match.teamA : match.teamB)
+  const isTeamA = assignment.match.teamA.some((player) => player.id === participantId);
+  const teammates = (isTeamA ? assignment.match.teamA : assignment.match.teamB)
     .filter((player) => player.id !== participantId)
     .map((player) => player.name);
-  const opponents = (isTeamA ? match.teamB : match.teamA).map((player) => player.name);
+  const opponents = (isTeamA ? assignment.match.teamB : assignment.match.teamA).map((player) => player.name);
 
   return {
-    title: `Round ${currentRound.roundNumber} / Court ${match.court}`,
-    body: `팀 ${teammates.length > 0 ? teammates.join(", ") : "단식"} / 상대 ${opponents.join(", ")}`,
+    title: `${assignment.round.roundNumber}라운드 / ${assignment.match.court}번 코트`,
+    body: `다음 경기: ${assignment.round.roundNumber}라운드 / ${assignment.match.court}번 코트로 가세요 · 파트너 ${teammates.length > 0 ? teammates.join(", ") : "없음"} · 상대팀 ${opponents.join(", ")}`,
   };
 }
 
@@ -108,6 +125,7 @@ export default function GuestEventPage() {
   const [eventClubName, setEventClubName] = useState<string | null>(null);
   const [participantClubName, setParticipantClubName] = useState<string | null>(null);
   const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
+  const [showAllRounds, setShowAllRounds] = useState(false);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -189,15 +207,21 @@ export default function GuestEventPage() {
   }, [currentEvent, participantId]);
 
   const currentRound = useMemo(() => (currentEvent ? getCurrentRound(currentEvent) : null), [currentEvent]);
-  const currentMatch = useMemo(() => {
-    if (!currentRound || !participantId) {
+  const nextMatchContext = useMemo(() => {
+    if (!currentEvent || !participantId) {
       return null;
     }
 
-    return (Array.isArray(currentRound.matches) ? currentRound.matches : []).find((match) =>
-      [...(Array.isArray(match.teamA) ? match.teamA : []), ...(Array.isArray(match.teamB) ? match.teamB : [])].some((player) => player.id === participantId),
-    ) ?? null;
-  }, [currentRound, participantId]);
+    return findNextMatchContext(currentEvent, participantId);
+  }, [currentEvent, participantId]);
+  const currentMatch = useMemo(() => {
+    if (!nextMatchContext || !participantId) {
+      return null;
+    }
+
+    return nextMatchContext.match;
+  }, [nextMatchContext, participantId]);
+  const currentMatchRound = nextMatchContext?.round ?? null;
   const isParticipantInTeamA = Boolean(
     currentMatch && participantId && currentMatch.teamA.some((player) => player.id === participantId),
   );
@@ -207,9 +231,6 @@ export default function GuestEventPage() {
   const teamALabel = currentMatch ? (isParticipantInTeamA ? "A팀 (내 팀)" : "A팀 (상대 팀)") : "A팀";
   const teamBLabel = currentMatch ? (isParticipantInTeamA ? "B팀 (상대 팀)" : "B팀 (내 팀)") : "B팀";
   const currentRoundMatches = Array.isArray(currentRound?.matches) ? currentRound.matches : [];
-  const hasAcceptedProposal = Boolean(
-    participantId && currentMatch?.scoreProposal?.acceptedByParticipantIds.includes(participantId),
-  );
   const hasDisputedProposal = Boolean(
     participantId && currentMatch?.scoreProposal?.disputedByParticipantIds.includes(participantId),
   );
@@ -260,21 +281,23 @@ export default function GuestEventPage() {
   }, [currentEvent]);
 
   async function submitProposalScores(scoreA: number, scoreB: number): Promise<void> {
-    if (!eventId || !currentRound || !currentMatch || !participantId) {
+    if (!eventId || !currentMatchRound || !currentMatch || !participantId) {
       return;
     }
 
-    await submitMatchScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, {
+    await submitMatchScoreProposal(eventId, currentMatchRound.roundNumber, currentMatch.id ?? "", participantId, {
       scoreA,
       scoreB,
     });
     await touchParticipantSession(eventId, { participantId });
     setScoreDraft({ scoreA: "", scoreB: "" });
     setPendingCustomScore(null);
+    setToastMessage("점수가 등록되었습니다.");
+    window.setTimeout(() => setToastMessage(null), 1800);
   }
 
   async function handleSubmitProposal(): Promise<void> {
-    if (!eventId || !currentRound || !currentMatch || !participantId) {
+    if (!eventId || !currentMatchRound || !currentMatch || !participantId) {
       return;
     }
 
@@ -303,21 +326,15 @@ export default function GuestEventPage() {
     await handleProposalResponse("dispute", reason ?? null);
   }
 
-  async function handleProposalResponse(response: "accept" | "dispute", reason?: string | null): Promise<void> {
-    if (!eventId || !currentRound || !currentMatch || !participantId) {
+  async function handleProposalResponse(response: "dispute", reason?: string | null): Promise<void> {
+    if (!eventId || !currentMatchRound || !currentMatch || !participantId) {
       return;
     }
 
-    await respondToScoreProposal(eventId, currentRound.roundNumber, currentMatch.id ?? "", participantId, response, reason);
+    await respondToScoreProposal(eventId, currentMatchRound.roundNumber, currentMatch.id ?? "", participantId, response, reason);
     await touchParticipantSession(eventId, { participantId });
-    if (response === "accept") {
-      window.alert("확인되었습니다.");
-      setToastMessage("Moving to next round.");
-      window.setTimeout(() => setToastMessage(null), 1800);
-    } else {
-      setToastMessage("이의신청이 접수되었습니다.");
-      window.setTimeout(() => setToastMessage(null), 1800);
-    }
+    setToastMessage("이의신청이 접수되었습니다.");
+    window.setTimeout(() => setToastMessage(null), 1800);
   }
 
   async function handleRead(notificationId: string): Promise<void> {
@@ -370,6 +387,9 @@ export default function GuestEventPage() {
         <Link href="/guest" className="poster-button-secondary">
           다른 이벤트 참여
         </Link>
+        <button type="button" onClick={() => setShowAllRounds((current) => !current)} className="poster-button-secondary">
+          {showAllRounds ? "게임화면으로 돌아가기" : "전체 라운드 보기"}
+        </button>
         {eventId ? (
           <Link href={`/event/${eventId}/leaderboard`} className="poster-button">
             리더보드
@@ -384,12 +404,12 @@ export default function GuestEventPage() {
       ) : null}
 
       <section className="border-t border-line py-6">
-        <p className="poster-label">Player Status</p>
+        <p className="poster-label">참가 상태</p>
         <h1 className="mt-3 text-4xl font-black tracking-[-0.04em]">{assignment.title}</h1>
         <p className="mt-4 text-sm leading-6 text-ink/72">{assignment.body}</p>
-        {currentMatch && currentRound ? (
+        {currentMatch && currentMatchRound ? (
           <div className="mt-4 text-lg font-semibold text-accentStrong">
-            Round {currentRound.roundNumber} / Court {currentMatch.court}
+            현재 경기 · {currentMatchRound.roundNumber}라운드 / {currentMatch.court}번 코트
           </div>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold tracking-[0.16em] text-ink/55 uppercase">
@@ -412,7 +432,35 @@ export default function GuestEventPage() {
         ) : null}
       </section>
 
-      {currentMatch && participantId ? (
+      {showAllRounds && currentEvent ? (
+        <section className="mt-6 border-t border-line py-6">
+          <h2 className="text-3xl font-black tracking-[-0.03em]">전체 라운드 보기</h2>
+          <div className="mt-4 space-y-5">
+            {currentEvent.rounds.map((round) => (
+              <div key={round.id ?? round.roundNumber} className="border-b border-line pb-4">
+                <div className="text-sm font-semibold text-ink/75">{round.roundNumber}라운드</div>
+                <div className="mt-3 space-y-3">
+                  {round.matches.map((match) => {
+                    const isCurrent = match.id === currentMatch?.id;
+                    return (
+                      <div key={match.id ?? `${round.roundNumber}-${match.court}`} className={`py-2 text-sm ${isCurrent ? "text-accentStrong" : "text-ink/78"}`}>
+                        <div className="font-semibold">
+                          {match.court}번 코트 {isCurrent ? "· 현재 경기" : ""}
+                        </div>
+                        <div className="mt-1">A팀: {match.teamA.map((player) => player.name).join(" / ")}</div>
+                        <div>B팀: {match.teamB.map((player) => player.name).join(" / ")}</div>
+                        <div className="mt-1 text-xs">{match.scoreA ?? "-"} : {match.scoreB ?? "-"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {currentMatch && participantId && !showAllRounds ? (
         <section className="mt-6 border-t border-line py-6">
           <h2 className="text-3xl font-black tracking-[-0.03em]">현재 경기</h2>
           <div className="mt-5 grid gap-4">
@@ -468,7 +516,7 @@ export default function GuestEventPage() {
               onClick={() => void handleSubmitProposal()}
               className="poster-button w-fit"
             >
-              점수 제출
+              점수 등록
             </button>
 
             {pendingCustomScore ? (
@@ -490,31 +538,18 @@ export default function GuestEventPage() {
 
             {currentMatch.scoreProposal ? (
               <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">
-                <div className="font-semibold">이 점수가 맞습니까?</div>
+                <div className="font-semibold">등록된 점수</div>
                 <div className="mt-2">{teamALabel} {currentMatch.scoreProposal.scoreA} : {teamBLabel} {currentMatch.scoreProposal.scoreB}</div>
-                {currentMatch.scoreProposal.submittedByParticipantId !== participantId ? (
-                  <div className="mt-3 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleProposalResponse("accept")}
-                      disabled={hasAcceptedProposal || hasDisputedProposal}
-                      className="poster-button-secondary disabled:opacity-60"
-                    >
-                      수락
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDispute()}
-                      disabled={hasAcceptedProposal || hasDisputedProposal}
-                      className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
-                    >
-                      {hasDisputedProposal ? "이의신청중입니다" : "이의신청"}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mt-3 text-xs text-ink/70">다른 선수들의 확인을 기다리는 중입니다.</div>
-                )}
-                {hasAcceptedProposal ? <div className="mt-3 text-xs font-semibold text-accentStrong">내 확인이 반영되었습니다.</div> : null}
+                <div className="mt-3 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleDispute()}
+                    disabled={hasDisputedProposal}
+                    className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
+                  >
+                    {hasDisputedProposal ? "이의신청중입니다" : "이의신청"}
+                  </button>
+                </div>
                 {hasDisputedProposal ? <div className="mt-3 text-xs font-semibold text-red-700">이의신청이 접수되었습니다.</div> : null}
               </div>
             ) : null}
