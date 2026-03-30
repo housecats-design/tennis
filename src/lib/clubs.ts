@@ -745,6 +745,47 @@ export async function getClubById(clubId: string): Promise<Club | null> {
   return club;
 }
 
+async function findClubByName(clubName: string): Promise<Club | null> {
+  const normalizedClubName = normalizeClubName(clubName);
+  if (!normalizedClubName || !isSupabaseEnabled()) {
+    return loadCachedClubs().find((club) => normalizeClubName(club.clubName) === normalizedClubName) ?? null;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase!
+    .from("clubs")
+    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .eq("club_name", normalizedClubName)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (shouldFallbackToLocal(error)) {
+      return loadCachedClubs().find((club) => normalizeClubName(club.clubName) === normalizedClubName) ?? null;
+    }
+    return null;
+  }
+
+  const club = normalizeClub({
+    id: (data as ClubRow).id,
+    clubName: (data as ClubRow).club_name,
+    region: (data as ClubRow).region ?? null,
+    description: (data as ClubRow).description ?? null,
+    visibility: normalizeClubVisibility((data as ClubRow).visibility),
+    createdByUserId: (data as ClubRow).created_by_user_id,
+    status: normalizeClubStatus((data as ClubRow).status),
+    approvedBy: (data as ClubRow).approved_by ?? null,
+    approvedAt: (data as ClubRow).approved_at ?? null,
+    isActive: (data as ClubRow).is_active ?? true,
+    deletedAt: (data as ClubRow).deleted_at ?? null,
+    createdAt: (data as ClubRow).created_at ?? new Date().toISOString(),
+    updatedAt: (data as ClubRow).updated_at ?? new Date().toISOString(),
+  });
+
+  const cached = loadCachedClubs().filter((item) => item.id !== club.id);
+  cacheClubs([club, ...cached]);
+  return club;
+}
+
 export async function updateClubVisibility(input: {
   clubId: string;
   actorUserId: string;
@@ -1129,9 +1170,14 @@ export async function submitClubJoinRequest(input: {
   userId: string;
   message?: string | null;
 }): Promise<ClubJoinRequest> {
-  const targetClub = await getClubById(input.clubId);
+  let targetClub = await getClubById(input.clubId);
   if (!targetClub) {
     throw new Error("클럽 정보를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.");
+  }
+
+  const clubFromName = await findClubByName(targetClub.clubName);
+  if (clubFromName) {
+    targetClub = clubFromName;
   }
 
   const memberships = await listMyClubMemberships(input.userId);
@@ -1155,7 +1201,7 @@ export async function submitClubJoinRequest(input: {
 
   const nextRequest = normalizeClubJoinRequest({
     id: makeId("club_join"),
-    clubId: input.clubId,
+    clubId: targetClub.id,
     userId: input.userId,
     status: "pending",
     message: input.message ?? null,
@@ -1187,7 +1233,7 @@ export async function submitClubJoinRequest(input: {
 
     const { error } = await supabase!.from("club_join_requests").insert({
       id: nextRequest.id,
-      club_id: nextRequest.clubId,
+      club_id: targetClub.id,
       user_id: nextRequest.userId,
       status: nextRequest.status,
       message: nextRequest.message ?? null,
