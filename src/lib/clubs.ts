@@ -269,10 +269,22 @@ export function canCreateClubEvent(role: ClubRole): boolean {
   return role === "leader" || role === "vice_leader";
 }
 
+export function isActiveClubMembership(member: ClubMember | null | undefined): boolean {
+  if (!member) {
+    return false;
+  }
+
+  if (member.deletedAt != null || member.leftAt != null) {
+    return false;
+  }
+
+  return member.isActive !== false;
+}
+
 export async function listMyApprovedClubs(userId: string): Promise<Array<{ club: Club; membership: ClubMember }>> {
   const memberships = await listMyClubMemberships(userId);
   const approvedMemberships = memberships.filter(
-    (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
+    (membership) => isActiveClubMembership(membership),
   );
   const clubs = await Promise.all(approvedMemberships.map((membership) => getClubById(membership.clubId)));
   return approvedMemberships
@@ -309,7 +321,7 @@ export async function buildClubHomeData(clubId: string): Promise<{
     listProfiles(),
   ]);
 
-  const approvedMembers = members.filter((member) => member.membershipStatus === "approved" && member.deletedAt == null && member.leftAt == null);
+  const approvedMembers = members.filter((member) => isActiveClubMembership(member));
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
   let clubStats: { matchesPlayed: number; wins: number; losses: number; points: number } | null = null;

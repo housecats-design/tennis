@@ -6,6 +6,7 @@ import {
   canCreateClubEvent,
   getClubById,
   getClubMembership,
+  isActiveClubMembership,
   getPendingJoinRequest,
   listClubMembers,
   listMyClubMemberships,
@@ -78,12 +79,12 @@ export default function ClubDetailPage() {
   );
   const canApproveRequests = Boolean(
     currentClubMembership &&
-    currentClubMembership.membershipStatus === "approved" &&
+    isActiveClubMembership(currentClubMembership) &&
     canApproveClubJoinRequests(currentClubMembership.role),
   );
   const canOperateClubEvent = Boolean(
     currentClubMembership &&
-    currentClubMembership.membershipStatus === "approved" &&
+    isActiveClubMembership(currentClubMembership) &&
     canCreateClubEvent(currentClubMembership.role),
   );
 
@@ -203,7 +204,7 @@ export default function ClubDetailPage() {
     );
   }
 
-  const isApprovedMember = membership?.membershipStatus === "approved" && membership.leftAt == null;
+  const isApprovedMember = isActiveClubMembership(currentClubMembership ?? membership ?? null);
 
   return (
     <main className="poster-page max-w-5xl">
@@ -254,7 +255,7 @@ export default function ClubDetailPage() {
         <div className="mt-4 space-y-3">
           {clubMembers.length > 0 ? (
             clubMembers
-              .filter((item) => item.membershipStatus === "approved" && item.deletedAt == null && item.leftAt == null)
+              .filter((item) => isActiveClubMembership(item))
               .map((member) => (
                 <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 text-sm">
                   <div>

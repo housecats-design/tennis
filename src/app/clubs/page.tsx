@@ -2,6 +2,7 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import {
+  isActiveClubMembership,
   listActiveClubs,
   listMyClubApplications,
   listMyClubMemberships,
@@ -42,9 +43,7 @@ export default function ClubsPage() {
           ]);
           setMemberships(nextMemberships);
           setApplications(nextApplications);
-          const hasApprovedClub = nextMemberships.some(
-            (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
-          );
+          const hasApprovedClub = nextMemberships.some((membership) => isActiveClubMembership(membership));
           if (hasApprovedClub) {
             shouldKeepLoading = true;
             setRedirecting(true);
@@ -93,7 +92,7 @@ export default function ClubsPage() {
 
   const joinedClubIds = new Set(
     memberships
-      .filter((membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null)
+      .filter((membership) => isActiveClubMembership(membership))
       .map((membership) => membership.clubId),
   );
 
