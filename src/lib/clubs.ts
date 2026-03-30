@@ -1129,6 +1129,11 @@ export async function submitClubJoinRequest(input: {
   userId: string;
   message?: string | null;
 }): Promise<ClubJoinRequest> {
+  const targetClub = await getClubById(input.clubId);
+  if (!targetClub) {
+    throw new Error("클럽 정보를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.");
+  }
+
   const memberships = await listMyClubMemberships(input.userId);
   const approvedMembershipCount = memberships.filter(
     (membership) => membership.membershipStatus === "approved" && membership.deletedAt == null && membership.leftAt == null,
@@ -1158,6 +1163,28 @@ export async function submitClubJoinRequest(input: {
 
   if (isSupabaseEnabled()) {
     const supabase = getSupabaseClient();
+    const { error: syncClubError } = await supabase!.from("clubs").upsert(
+      {
+        id: targetClub.id,
+        club_name: targetClub.clubName,
+        region: targetClub.region ?? null,
+        description: targetClub.description ?? null,
+        created_by_user_id: targetClub.createdByUserId,
+        status: targetClub.status ?? "approved",
+        approved_by: targetClub.approvedBy ?? null,
+        approved_at: targetClub.approvedAt ?? null,
+        is_active: targetClub.isActive ?? true,
+        deleted_at: targetClub.deletedAt ?? null,
+        created_at: targetClub.createdAt,
+        updated_at: targetClub.updatedAt,
+      },
+      { onConflict: "id" },
+    );
+
+    if (syncClubError && !shouldFallbackToLocal(syncClubError)) {
+      throw new Error("클럽 정보를 동기화하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
     const { error } = await supabase!.from("club_join_requests").insert({
       id: nextRequest.id,
       club_id: nextRequest.clubId,
@@ -1169,6 +1196,8 @@ export async function submitClubJoinRequest(input: {
     if (error) {
       if (shouldFallbackToLocal(error)) {
         cacheJoinRequests([nextRequest, ...loadCachedJoinRequests()]);
+      } else if (error.message?.includes("club_join_requests_club_id_fkey")) {
+        throw new Error("클럽 정보가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.");
       } else {
         throw new Error(error.message);
       }
