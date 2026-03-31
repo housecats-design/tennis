@@ -17,6 +17,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 export default function ClubsPage() {
   const router = useRouter();
+  const isDev = process.env.NODE_ENV === "development";
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [memberships, setMemberships] = useState<ClubMember[]>([]);
@@ -30,14 +31,20 @@ export default function ClubsPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [debugAuthUser, setDebugAuthUser] = useState<unknown>(null);
+  const [debugMembershipRows, setDebugMembershipRows] = useState<unknown>(null);
+  const [debugClubsRows, setDebugClubsRows] = useState<unknown>(null);
+  const [debugRoutingDecision, setDebugRoutingDecision] = useState<string>("초기화 전");
 
   useEffect(() => {
     const load = async () => {
       let shouldKeepLoading = false;
       setLoadError(null);
+      setDebugRoutingDecision("로딩 중");
       try {
         const supabase = getSupabaseClient();
         const authResult = supabase ? await supabase.auth.getUser() : { data: { user: null }, error: null };
+        setDebugAuthUser(authResult.data.user ?? null);
         console.info("[clubs-routing] auth user object", authResult.data.user ?? null);
         if (authResult.error) {
           console.error("[clubs-routing] auth user fetch failed", authResult.error);
@@ -80,6 +87,7 @@ export default function ClubsPage() {
           ]);
 
           if (membershipResult.status === "fulfilled") {
+            setDebugMembershipRows(membershipResult.value.data ?? null);
             if (membershipResult.value.error) {
               console.error("[clubs-routing] club_members query error", membershipResult.value.error);
               setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -113,10 +121,12 @@ export default function ClubsPage() {
             });
           } else {
             console.error("[clubs-routing] club_members fetch failed", membershipResult.reason);
+            setDebugMembershipRows({ error: String(membershipResult.reason) });
             setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
           }
 
           if (clubsResult.status === "fulfilled") {
+            setDebugClubsRows(clubsResult.value.data ?? null);
             if (clubsResult.value.error) {
               console.error("[clubs-routing] clubs query error", clubsResult.value.error);
               setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -151,6 +161,7 @@ export default function ClubsPage() {
             });
           } else {
             console.error("[clubs-routing] clubs fetch failed", clubsResult.reason);
+            setDebugClubsRows({ error: String(clubsResult.reason) });
             setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
           }
 
@@ -173,17 +184,21 @@ export default function ClubsPage() {
             })[0];
 
           if (defaultMembership) {
+            setDebugRoutingDecision(`내 클럽 홈으로 이동: ${defaultMembership.clubId}`);
             shouldKeepLoading = true;
             setRedirecting(true);
             router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
             return;
           }
+          setDebugRoutingDecision("클럽 탐색 화면 유지");
         } else {
           setMemberships([]);
           setApplications([]);
+          setDebugMembershipRows([]);
           try {
             nextClubs = await listActiveClubs({ strict: true });
             setClubs(nextClubs);
+            setDebugClubsRows(nextClubs);
             console.info("[clubs-routing] clubs", {
               count: nextClubs.length,
               clubs: nextClubs.map((club) => ({
@@ -194,8 +209,10 @@ export default function ClubsPage() {
             });
           } catch (clubError) {
             console.error("[clubs-routing] clubs fetch failed", clubError);
+            setDebugClubsRows({ error: clubError instanceof Error ? clubError.message : String(clubError) });
             setLoadError("클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
           }
+          setDebugRoutingDecision("비로그인 또는 클럽 없음: 탐색 화면");
         }
       } finally {
         if (!shouldKeepLoading) {
@@ -263,7 +280,24 @@ export default function ClubsPage() {
   }, [clubs, loadError, loading, myClubs]);
 
   if (loading || redirecting) {
-    return <main className="poster-page max-w-5xl text-sm text-ink/70">클럽 화면을 불러오는 중...</main>;
+    return (
+      <main className="poster-page max-w-5xl text-sm text-ink/70">
+        <div>클럽 화면을 불러오는 중...</div>
+        {isDev ? (
+          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+            <div className="font-bold">클럽 디버그</div>
+            <div>auth user id: {profile?.id ?? (debugAuthUser && typeof debugAuthUser === "object" && debugAuthUser !== null && "id" in (debugAuthUser as Record<string, unknown>) ? String((debugAuthUser as Record<string, unknown>).id ?? "") : "-")}</div>
+            <div>auth user email: {profile?.email ?? (debugAuthUser && typeof debugAuthUser === "object" && debugAuthUser !== null && "email" in (debugAuthUser as Record<string, unknown>) ? String((debugAuthUser as Record<string, unknown>).email ?? "") : "-")}</div>
+            <div>loading: {String(loading)}</div>
+            <div>error: {loadError ?? "-"}</div>
+            <div>routing: {debugRoutingDecision}</div>
+            <div>myClubs length: {myClubs.length}</div>
+            <div>discoveryClubs length: {clubs.length}</div>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify({ clubMembers: debugMembershipRows, clubs: debugClubsRows }, null, 2)}</pre>
+          </div>
+        ) : null}
+      </main>
+    );
   }
 
   return (
@@ -281,6 +315,19 @@ export default function ClubsPage() {
           클럽 소개를 보고, 가입 신청을 보내고, 클럽 생성 요청과 내 요청 이력을 확인할 수 있습니다.
         </p>
         {loadError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div> : null}
+        {isDev ? (
+          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+            <div className="font-bold">클럽 디버그</div>
+            <div>auth user id: {profile?.id ?? "-"}</div>
+            <div>auth user email: {profile?.email ?? "-"}</div>
+            <div>loading: {String(loading)}</div>
+            <div>error: {loadError ?? "-"}</div>
+            <div>routing: {debugRoutingDecision}</div>
+            <div>myClubs length: {myClubs.length}</div>
+            <div>discoveryClubs length: {clubs.length}</div>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify({ clubMembers: debugMembershipRows, clubs: debugClubsRows }, null, 2)}</pre>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-10 border-t border-line py-8 lg:grid-cols-[0.95fr_1.05fr]">
