@@ -334,7 +334,7 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
   const supabase = getSupabaseClient();
   const { data: membershipRows, error: membershipError } = await supabase!
     .from("club_members")
-    .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+    .select("id, club_id, user_id, role, joined_at, is_active, deleted_at")
     .eq("user_id", userId)
     .eq("is_active", true)
     .is("deleted_at", null)
@@ -350,11 +350,7 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
       clubId: (row as ClubMemberRow).club_id,
       userId: (row as ClubMemberRow).user_id,
       role: normalizeClubRole((row as ClubMemberRow).role),
-      membershipStatus: normalizeMembershipStatus((row as ClubMemberRow).membership_status),
       joinedAt: (row as ClubMemberRow).joined_at ?? new Date().toISOString(),
-      approvedBy: (row as ClubMemberRow).approved_by ?? null,
-      approvedAt: (row as ClubMemberRow).approved_at ?? null,
-      leftAt: (row as ClubMemberRow).left_at ?? null,
       isActive: (row as ClubMemberRow).is_active ?? true,
       deletedAt: (row as ClubMemberRow).deleted_at ?? null,
     }),
@@ -533,7 +529,7 @@ export async function listClubMembers(clubId: string): Promise<ClubMember[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("club_members")
-    .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+    .select("id, club_id, user_id, role, joined_at, is_active, deleted_at")
     .eq("club_id", clubId)
     .is("deleted_at", null)
     .order("joined_at", { ascending: true });
@@ -551,11 +547,7 @@ export async function listClubMembers(clubId: string): Promise<ClubMember[]> {
       clubId: (row as ClubMemberRow).club_id,
       userId: (row as ClubMemberRow).user_id,
       role: normalizeClubRole((row as ClubMemberRow).role),
-      membershipStatus: normalizeMembershipStatus((row as ClubMemberRow).membership_status),
       joinedAt: (row as ClubMemberRow).joined_at ?? new Date().toISOString(),
-      approvedBy: (row as ClubMemberRow).approved_by ?? null,
-      approvedAt: (row as ClubMemberRow).approved_at ?? null,
-      leftAt: (row as ClubMemberRow).left_at ?? null,
       isActive: (row as ClubMemberRow).is_active ?? true,
       deletedAt: (row as ClubMemberRow).deleted_at ?? null,
     }),
@@ -964,7 +956,7 @@ export async function listMyClubMemberships(userId: string, options?: { strict?:
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("club_members")
-    .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+    .select("id, club_id, user_id, role, joined_at, is_active, deleted_at")
     .eq("user_id", userId)
     .eq("is_active", true)
     .is("deleted_at", null)
@@ -986,11 +978,7 @@ export async function listMyClubMemberships(userId: string, options?: { strict?:
       clubId: (row as ClubMemberRow).club_id,
       userId: (row as ClubMemberRow).user_id,
       role: normalizeClubRole((row as ClubMemberRow).role),
-      membershipStatus: normalizeMembershipStatus((row as ClubMemberRow).membership_status),
       joinedAt: (row as ClubMemberRow).joined_at ?? new Date().toISOString(),
-      approvedBy: (row as ClubMemberRow).approved_by ?? null,
-      approvedAt: (row as ClubMemberRow).approved_at ?? null,
-      leftAt: (row as ClubMemberRow).left_at ?? null,
       isActive: (row as ClubMemberRow).is_active ?? true,
       deletedAt: (row as ClubMemberRow).deleted_at ?? null,
     }),

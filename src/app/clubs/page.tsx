@@ -147,7 +147,7 @@ export default function ClubsPage() {
         const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
           supabase
             .from("club_members")
-            .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+            .select("id, club_id, user_id, role, joined_at, is_active, deleted_at")
             .eq("user_id", authUserId)
             .is("deleted_at", null)
             .eq("is_active", true)
@@ -177,11 +177,7 @@ export default function ClubsPage() {
                 clubId: membershipRow.club_id,
                 userId: membershipRow.user_id,
                 role: membershipRow.role,
-                membershipStatus: membershipRow.membership_status,
                 joinedAt: membershipRow.joined_at ?? new Date().toISOString(),
-                approvedBy: membershipRow.approved_by ?? null,
-                approvedAt: membershipRow.approved_at ?? null,
-                leftAt: membershipRow.left_at ?? null,
                 isActive: membershipRow.is_active ?? true,
                 deletedAt: membershipRow.deleted_at ?? null,
               }),

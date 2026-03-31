@@ -68,7 +68,7 @@ export default function ClubHomePage() {
         const [membershipResult, clubsResult, nextClubs] = await Promise.all([
           supabase
             .from("club_members")
-            .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+            .select("id, club_id, user_id, role, joined_at, is_active, deleted_at")
             .eq("user_id", nextAuthUserId)
             .eq("is_active", true)
             .is("deleted_at", null)
@@ -98,11 +98,7 @@ export default function ClubHomePage() {
             clubId: row.club_id,
             userId: row.user_id,
             role: row.role,
-            membershipStatus: row.membership_status,
             joinedAt: row.joined_at ?? new Date().toISOString(),
-            approvedBy: row.approved_by ?? null,
-            approvedAt: row.approved_at ?? null,
-            leftAt: row.left_at ?? null,
             isActive: row.is_active ?? true,
             deletedAt: row.deleted_at ?? null,
           }),
