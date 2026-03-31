@@ -529,25 +529,6 @@ export async function updateClubJoinRequestStatus(input: {
 
   if (isSupabaseEnabled()) {
     const supabase = getSupabaseClient();
-    const { error: requestError } = await supabase!
-      .from("club_join_requests")
-      .update({
-        status: nextRequest.status,
-        reviewed_by: nextRequest.reviewedBy ?? null,
-        reviewed_at: nextRequest.reviewedAt ?? null,
-      })
-      .eq("id", input.requestId);
-
-    if (requestError) {
-      if (shouldFallbackToLocal(requestError)) {
-        cacheJoinRequests(
-          loadCachedJoinRequests().map((request) => (request.id === input.requestId ? nextRequest : request)),
-        );
-      } else {
-        throw new Error(requestError.message);
-      }
-    }
-
     if (input.status === "approved") {
       nextMembership = normalizeClubMember({
         id: makeId("club_member"),
@@ -578,12 +559,39 @@ export async function updateClubJoinRequestStatus(input: {
       );
 
       if (membershipError) {
-        if (shouldFallbackToLocal(membershipError)) {
-          const existingMemberships = loadCachedMembers().filter((member) => !(member.clubId === input.clubId && member.userId === targetRequest.userId));
-          cacheMembers([...existingMemberships, nextMembership]);
-        } else {
-          throw new Error(membershipError.message);
-        }
+        throw new Error(membershipError.message);
+      }
+
+      const existingMemberships = loadCachedMembers().filter(
+        (member) => !(member.clubId === input.clubId && member.userId === targetRequest.userId),
+      );
+      cacheMembers([...existingMemberships, nextMembership]);
+    }
+
+    const { error: requestError } = await supabase!
+      .from("club_join_requests")
+      .update({
+        status: nextRequest.status,
+        reviewed_by: nextRequest.reviewedBy ?? null,
+        reviewed_at: nextRequest.reviewedAt ?? null,
+      })
+      .eq("id", input.requestId);
+
+    if (requestError) {
+      if (input.status === "approved" && nextMembership) {
+        await supabase!
+          .from("club_members")
+          .delete()
+          .eq("club_id", input.clubId)
+          .eq("user_id", targetRequest.userId);
+      }
+
+      if (shouldFallbackToLocal(requestError)) {
+        cacheJoinRequests(
+          loadCachedJoinRequests().map((request) => (request.id === input.requestId ? nextRequest : request)),
+        );
+      } else {
+        throw new Error(requestError.message);
       }
     }
   } else {
@@ -668,7 +676,7 @@ export async function updateClubMemberRole(input: {
 export async function listActiveClubs(): Promise<Club[]> {
   if (!isSupabaseEnabled()) {
     return loadCachedClubs().filter(
-      (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+      (club) => club.deletedAt == null && club.isActive !== false && club.status !== "rejected" && club.status !== "pending",
     );
   }
 
@@ -679,18 +687,18 @@ export async function listActiveClubs(): Promise<Club[]> {
     .from("clubs")
     .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
     .is("deleted_at", null)
+    .eq("is_active", true)
     .in("status", ["active", "approved"])
-    .eq("visibility", "public")
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
     if (shouldFallbackToLocal(error)) {
       return loadCachedClubs().filter(
-        (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+        (club) => club.deletedAt == null && club.isActive !== false && club.status !== "rejected" && club.status !== "pending",
       );
     }
     return loadCachedClubs().filter(
-      (club) => club.deletedAt == null && club.status !== "rejected" && club.status !== "pending" && club.visibility !== "private",
+      (club) => club.deletedAt == null && club.isActive !== false && club.status !== "rejected" && club.status !== "pending",
     );
   }
 

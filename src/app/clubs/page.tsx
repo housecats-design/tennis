@@ -147,18 +147,40 @@ export default function ClubsPage() {
             <div className="mt-4 space-y-3">
               {clubs.length > 0 ? (
                 clubs.map((club) => (
-                  <Link key={club.id} href={`/clubs/${club.id}`} className="block border-b border-line py-4">
+                  <div key={club.id} className="border-b border-line py-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-lg font-bold">{club.clubName}</div>
-                        <div className="mt-1 text-xs text-ink/60">{club.region ? `${club.region} · ` : ""}{club.description ?? "소개가 아직 없습니다."}</div>
+                        <div className="mt-1 text-xs text-ink/60">
+                          {club.region ? `${club.region} · ` : ""}
+                          {club.description ?? "소개가 아직 없습니다."}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
+                          <span className="text-accentStrong">{club.status === "approved" ? "승인됨" : "운영중"}</span>
+                          <span className={club.visibility === "private" ? "text-red-700" : "text-ink/55"}>
+                            {club.visibility === "private" ? "비공개" : "공개"}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-accentStrong">{club.status === "approved" ? "승인됨" : "운영중"}</span>
+                      <div className="flex flex-col items-end gap-2">
+                        <Link href={`/clubs/${club.id}`} className="poster-button-secondary text-xs">
+                          상세보기
+                        </Link>
+                        {club.visibility === "private" ? (
+                          <button type="button" disabled className="poster-button-secondary text-xs opacity-50">
+                            비공개
+                          </button>
+                        ) : (
+                          <Link href={`/clubs/${club.id}`} className="poster-button-secondary text-xs">
+                            가입하기
+                          </Link>
+                        )}
+                      </div>
                     </div>
-                  </Link>
+                  </div>
                 ))
               ) : (
-                <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">아직 공개된 클럽이 없습니다.</div>
+                <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">아직 등록된 클럽이 없습니다.</div>
               )}
             </div>
           </div>

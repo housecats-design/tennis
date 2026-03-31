@@ -205,6 +205,7 @@ export default function ClubDetailPage() {
   }
 
   const isApprovedMember = isActiveClubMembership(currentClubMembership ?? membership ?? null);
+  const canRequestJoin = club.visibility !== "private";
 
   return (
     <main className="poster-page max-w-5xl">
@@ -239,8 +240,10 @@ export default function ClubDetailPage() {
             <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">이미 가입된 클럽입니다.</div>
           ) : joinRequest?.status === "pending" ? (
             <div className="border-l-2 border-amber-400 pl-4 text-amber-800">가입 요청 검토 중입니다.</div>
+          ) : !canRequestJoin ? (
+            <div className="border-l-2 border-red-300 pl-4 text-red-700">비공개 클럽은 가입 신청을 받을 수 없습니다.</div>
           ) : (
-            <button type="button" onClick={() => void handleJoinRequest()} disabled={!profile || submitting} className="poster-button disabled:opacity-60">
+            <button type="button" onClick={() => void handleJoinRequest()} disabled={!profile || submitting || !canRequestJoin} className="poster-button disabled:opacity-60">
               {submitting ? "요청 중..." : "가입 요청 보내기"}
             </button>
           )}
