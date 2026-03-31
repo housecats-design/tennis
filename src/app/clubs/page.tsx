@@ -8,6 +8,7 @@ import {
   listMyClubMemberships,
   submitClubApplication,
 } from "@/lib/clubs";
+import { getSupabaseClient } from "@/lib/supabase";
 import { Club, ClubApplication, ClubMember, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -32,17 +33,32 @@ export default function ClubsPage() {
     const load = async () => {
       let shouldKeepLoading = false;
       try {
-        const nextProfile = await getCurrentProfile();
-        const nextClubs = await listActiveClubs();
+        const nextProfile = await getCurrentProfile({ forceRefresh: true });
         setProfile(nextProfile);
-        setClubs(nextClubs);
+        console.info("[clubs-routing] auth user", {
+          userId: nextProfile?.id ?? null,
+          email: nextProfile?.email ?? null,
+        });
+
+        let nextMemberships: ClubMember[] = [];
         if (nextProfile?.id) {
-          const [nextMemberships, nextApplications] = await Promise.all([
-            listMyClubMemberships(nextProfile.id),
-            listMyClubApplications(nextProfile.id),
-          ]);
+          try {
+            nextMemberships = await listMyClubMemberships(nextProfile.id);
+            console.info("[clubs-routing] club_members", {
+              userId: nextProfile.id,
+              count: nextMemberships.length,
+              memberships: nextMemberships.map((membership) => ({
+                clubId: membership.clubId,
+                role: membership.role,
+                isActive: membership.isActive,
+                deletedAt: membership.deletedAt,
+              })),
+            });
+          } catch (membershipError) {
+            console.error("[clubs-routing] club_members fetch failed", membershipError);
+          }
+
           setMemberships(nextMemberships);
-          setApplications(nextApplications);
           const defaultMembership = [...nextMemberships]
             .filter((membership) => isActiveClubMembership(membership))
             .sort((left, right) => {
@@ -60,6 +76,32 @@ export default function ClubsPage() {
             router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
             return;
           }
+
+          try {
+            const nextApplications = await listMyClubApplications(nextProfile.id);
+            setApplications(nextApplications);
+          } catch (applicationError) {
+            console.error("[clubs-routing] club applications fetch failed", applicationError);
+          }
+        } else {
+          setMemberships([]);
+          setApplications([]);
+        }
+
+        try {
+          const nextClubs = await listActiveClubs();
+          setClubs(nextClubs);
+          console.info("[clubs-routing] clubs", {
+            count: nextClubs.length,
+            clubs: nextClubs.map((club) => ({
+              id: club.id,
+              clubName: club.clubName,
+              visibility: club.visibility ?? "public",
+            })),
+          });
+        } catch (clubError) {
+          console.error("[clubs-routing] clubs fetch failed", clubError);
+          setClubs([]);
         }
       } finally {
         if (!shouldKeepLoading) {
@@ -69,6 +111,15 @@ export default function ClubsPage() {
     };
 
     void load();
+
+    const supabase = getSupabaseClient();
+    const authSubscription = supabase?.auth.onAuthStateChange(() => {
+      void load();
+    });
+
+    return () => {
+      authSubscription?.data.subscription.unsubscribe();
+    };
   }, [router]);
 
   async function handleSubmitApplication(event: FormEvent<HTMLFormElement>): Promise<void> {

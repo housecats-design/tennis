@@ -96,8 +96,8 @@ export async function getAuthIdentity(): Promise<AuthIdentity | null> {
   };
 }
 
-export async function getCurrentProfile(): Promise<UserProfile | null> {
-  if (currentProfileCache !== undefined && Date.now() - currentProfileFetchedAt < PROFILE_CACHE_TTL_MS) {
+export async function getCurrentProfile(options?: { forceRefresh?: boolean }): Promise<UserProfile | null> {
+  if (!options?.forceRefresh && currentProfileCache !== undefined && Date.now() - currentProfileFetchedAt < PROFILE_CACHE_TTL_MS) {
     return currentProfileCache;
   }
 
