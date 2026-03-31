@@ -559,42 +559,25 @@ export async function updateClubJoinRequestStatus(input: {
   if (isSupabaseEnabled()) {
     const supabase = getSupabaseClient();
     if (input.status === "approved") {
-      nextMembership = normalizeClubMember({
-        id: makeId("club_member"),
+      await ensureClubMembershipRecord({
         clubId: input.clubId,
         userId: targetRequest.userId,
         role: "member",
-        membershipStatus: "approved",
         approvedBy: input.reviewerUserId,
         approvedAt: reviewedAt,
+        joinedAt: reviewedAt,
       });
-
-      const { error: membershipError } = await supabase!.from("club_members").upsert(
-        {
-          id: nextMembership.id,
-          club_id: nextMembership.clubId,
-          user_id: nextMembership.userId,
-          role: nextMembership.role,
-          membership_status: nextMembership.membershipStatus,
-          joined_at: nextMembership.joinedAt,
-          approved_by: nextMembership.approvedBy ?? null,
-          approved_at: nextMembership.approvedAt ?? null,
-          left_at: null,
-          is_active: true,
-          deleted_at: null,
-          created_at: new Date().toISOString(),
-        },
-        { onConflict: "club_id,user_id" },
-      );
-
-      if (membershipError) {
-        throw new Error(membershipError.message);
-      }
-
-      const existingMemberships = loadCachedMembers().filter(
-        (member) => !(member.clubId === input.clubId && member.userId === targetRequest.userId),
-      );
-      cacheMembers([...existingMemberships, nextMembership]);
+      nextMembership =
+        (await getClubMembership(input.clubId, targetRequest.userId)) ??
+        normalizeClubMember({
+          id: makeId("club_member"),
+          clubId: input.clubId,
+          userId: targetRequest.userId,
+          role: "member",
+          membershipStatus: "approved",
+          approvedBy: input.reviewerUserId,
+          approvedAt: reviewedAt,
+        });
     }
 
     const { error: requestError } = await supabase!
@@ -710,6 +693,7 @@ export async function listActiveClubs(): Promise<Club[]> {
   }
 
   await repairApprovedClubApplications();
+  await repairClubMembershipConsistency();
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
@@ -883,6 +867,8 @@ export async function listMyClubMemberships(userId: string): Promise<ClubMember[
     return [];
   }
 
+  await repairClubMembershipConsistency();
+
   if (!isSupabaseEnabled()) {
     return loadCachedMembers().filter((member) => member.userId === userId && member.deletedAt == null);
   }
@@ -1003,20 +989,23 @@ function buildClubIdFromApplication(application: ClubApplication): string {
   return `club_${suffix}`;
 }
 
-async function ensureLeaderMembershipForClub(input: {
+async function ensureClubMembershipRecord(input: {
   clubId: string;
-  applicantUserId: string;
-  reviewerUserId: string | null;
-  reviewedAt: string | null;
+  userId: string;
+  role: ClubRole;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  joinedAt?: string | null;
 }): Promise<void> {
-  const leaderMembership = normalizeClubMember({
+  const membership = normalizeClubMember({
     id: makeId("club_member"),
     clubId: input.clubId,
-    userId: input.applicantUserId,
-    role: "owner",
+    userId: input.userId,
+    role: input.role,
     membershipStatus: "approved",
-    approvedBy: input.reviewerUserId,
-    approvedAt: input.reviewedAt ?? new Date().toISOString(),
+    joinedAt: input.joinedAt ?? new Date().toISOString(),
+    approvedBy: input.approvedBy,
+    approvedAt: input.approvedAt ?? new Date().toISOString(),
     isActive: true,
   });
 
@@ -1024,14 +1013,14 @@ async function ensureLeaderMembershipForClub(input: {
     const supabase = getSupabaseClient();
     const { error } = await supabase!.from("club_members").upsert(
       {
-        id: leaderMembership.id,
-        club_id: leaderMembership.clubId,
-        user_id: leaderMembership.userId,
-        role: leaderMembership.role,
-        membership_status: leaderMembership.membershipStatus,
-        joined_at: leaderMembership.joinedAt,
-        approved_by: leaderMembership.approvedBy ?? null,
-        approved_at: leaderMembership.approvedAt ?? null,
+        id: membership.id,
+        club_id: membership.clubId,
+        user_id: membership.userId,
+        role: membership.role,
+        membership_status: membership.membershipStatus,
+        joined_at: membership.joinedAt,
+        approved_by: membership.approvedBy ?? null,
+        approved_at: membership.approvedAt ?? null,
         left_at: null,
         is_active: true,
         deleted_at: null,
@@ -1046,9 +1035,24 @@ async function ensureLeaderMembershipForClub(input: {
   }
 
   const currentMembers = loadCachedMembers().filter(
-    (member) => !(member.clubId === input.clubId && member.userId === input.applicantUserId),
+    (member) => !(member.clubId === input.clubId && member.userId === input.userId),
   );
-  cacheMembers([leaderMembership, ...currentMembers]);
+  cacheMembers([membership, ...currentMembers]);
+}
+
+async function ensureOwnerMembershipForClub(input: {
+  clubId: string;
+  applicantUserId: string;
+  reviewerUserId: string | null;
+  reviewedAt: string | null;
+}): Promise<void> {
+  await ensureClubMembershipRecord({
+    clubId: input.clubId,
+    userId: input.applicantUserId,
+    role: "owner",
+    approvedBy: input.reviewerUserId,
+    approvedAt: input.reviewedAt,
+  });
 }
 
 async function ensureClubForApprovedApplication(application: ClubApplication): Promise<Club | null> {
@@ -1058,7 +1062,7 @@ async function ensureClubForApprovedApplication(application: ClubApplication): P
 
   const existingClub = await findClubByName(application.clubName);
   if (existingClub) {
-    await ensureLeaderMembershipForClub({
+    await ensureOwnerMembershipForClub({
       clubId: existingClub.id,
       applicantUserId: application.applicantUserId,
       reviewerUserId: application.reviewedBy ?? null,
@@ -1108,7 +1112,7 @@ async function ensureClubForApprovedApplication(application: ClubApplication): P
 
   const currentClubs = loadCachedClubs().filter((club) => club.id !== createdClub.id);
   cacheClubs([createdClub, ...currentClubs]);
-  await ensureLeaderMembershipForClub({
+  await ensureOwnerMembershipForClub({
     clubId: createdClub.id,
     applicantUserId: application.applicantUserId,
     reviewerUserId: application.reviewedBy ?? null,
@@ -1130,6 +1134,85 @@ export async function repairApprovedClubApplications(): Promise<number> {
     }
 
     await ensureClubForApprovedApplication(application);
+    repairedCount += 1;
+  }
+
+  return repairedCount;
+}
+
+export async function repairClubMembershipConsistency(): Promise<number> {
+  let repairedCount = 0;
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const [{ data: clubsData, error: clubsError }, { data: joinData, error: joinError }] = await Promise.all([
+      supabase!
+        .from("clubs")
+        .select("id, created_by_user_id, approved_by, approved_at, is_active, deleted_at")
+        .is("deleted_at", null)
+        .eq("is_active", true),
+      supabase!
+        .from("club_join_requests")
+        .select("club_id, user_id, reviewed_by, reviewed_at, requested_at")
+        .eq("status", "approved"),
+    ]);
+
+    if (clubsError && !shouldFallbackToLocal(clubsError)) {
+      throw new Error(clubsError.message);
+    }
+    if (joinError && !shouldFallbackToLocal(joinError)) {
+      throw new Error(joinError.message);
+    }
+
+    for (const row of Array.isArray(clubsData) ? clubsData : []) {
+      await ensureClubMembershipRecord({
+        clubId: row.id,
+        userId: row.created_by_user_id,
+        role: "owner",
+        approvedBy: row.approved_by ?? null,
+        approvedAt: row.approved_at ?? null,
+      });
+      repairedCount += 1;
+    }
+
+    for (const row of Array.isArray(joinData) ? joinData : []) {
+      await ensureClubMembershipRecord({
+        clubId: row.club_id,
+        userId: row.user_id,
+        role: "member",
+        approvedBy: row.reviewed_by ?? null,
+        approvedAt: row.reviewed_at ?? null,
+        joinedAt: row.requested_at ?? null,
+      });
+      repairedCount += 1;
+    }
+
+    return repairedCount;
+  }
+
+  const clubs = loadCachedClubs().filter((club) => club.deletedAt == null && club.isActive !== false);
+  const approvedRequests = loadCachedJoinRequests().filter((request) => request.status === "approved");
+
+  for (const club of clubs) {
+    await ensureClubMembershipRecord({
+      clubId: club.id,
+      userId: club.createdByUserId,
+      role: "owner",
+      approvedBy: club.approvedBy ?? null,
+      approvedAt: club.approvedAt ?? null,
+    });
+    repairedCount += 1;
+  }
+
+  for (const request of approvedRequests) {
+    await ensureClubMembershipRecord({
+      clubId: request.clubId,
+      userId: request.userId,
+      role: "member",
+      approvedBy: request.reviewedBy ?? null,
+      approvedAt: request.reviewedAt ?? null,
+      joinedAt: request.requestedAt,
+    });
     repairedCount += 1;
   }
 
