@@ -33,6 +33,15 @@ export default function ClubHomePage() {
   const [rawClubRows, setRawClubRows] = useState<unknown>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [routingDecision, setRoutingDecision] = useState("CLUB HOME MODE");
+  const noClubReason = loadError
+    ? `클럽 홈 로딩 오류: ${loadError}`
+    : !authUserId
+      ? "auth user id가 없습니다."
+      : Array.isArray(rawMembershipRows) && rawMembershipRows.length === 0
+        ? "club_members 조회 결과가 0건입니다."
+        : myClubs.length === 0
+          ? "club_members는 조회됐지만 myClubs 조합 결과가 0건입니다."
+          : "원인 미확인";
 
   useEffect(() => {
     const load = async () => {
@@ -177,8 +186,21 @@ export default function ClubHomePage() {
   if (!profile) {
     return (
       <main className="poster-page max-w-5xl">
+        <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
+          DEBUG REAL CLUB HOME
+        </div>
+        <div className="mb-4 border-4 border-blue-700 bg-blue-100 px-4 py-3 text-base font-black tracking-[0.08em] text-blue-800">
+          CLUB HOME MODE
+        </div>
         <div className="border-t border-line py-8">
           <h1 className="text-4xl font-black tracking-[-0.04em]">클럽 홈은 로그인 후 이용할 수 있습니다.</h1>
+          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+            <div className="font-bold">클럽 홈 디버그</div>
+            <div>route: /clubs/home</div>
+            <div>auth user id: {authUserId ?? "-"}</div>
+            <div>membership count: {Array.isArray(rawMembershipRows) ? rawMembershipRows.length : 0}</div>
+            <div>reason: profile이 없어 클럽 홈을 렌더할 수 없습니다.</div>
+          </div>
           <div className="mt-5 flex gap-3">
             <Link href="/" className="poster-button">메인 페이지</Link>
             <Link href="/clubs" className="poster-button-secondary">클럽 탐색</Link>
@@ -191,8 +213,32 @@ export default function ClubHomePage() {
   if (myClubs.length === 0) {
     return (
       <main className="poster-page max-w-5xl">
+        <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
+          DEBUG REAL CLUB HOME
+        </div>
+        <div className="mb-4 border-4 border-blue-700 bg-blue-100 px-4 py-3 text-base font-black tracking-[0.08em] text-blue-800">
+          CLUB HOME MODE
+        </div>
         <div className="border-t border-line py-8">
           <h1 className="text-4xl font-black tracking-[-0.04em]">가입된 클럽이 없습니다.</h1>
+          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+            <div className="font-bold">클럽 홈 디버그</div>
+            <div>route: /clubs/home</div>
+            <div>auth user id: {authUserId ?? "-"}</div>
+            <div>auth user email: {authUserEmail ?? "-"}</div>
+            <div>membership count: {Array.isArray(rawMembershipRows) ? rawMembershipRows.length : 0}</div>
+            <div>reason: {noClubReason}</div>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+              {JSON.stringify(
+                {
+                  rawMembershipRows,
+                  rawClubRows,
+                },
+                null,
+                2,
+              )}
+            </pre>
+          </div>
           <div className="mt-5 flex gap-3">
             <Link href="/clubs" className="poster-button">클럽 탐색</Link>
             <Link href="/" className="poster-button-secondary">메인 페이지</Link>
@@ -205,7 +251,7 @@ export default function ClubHomePage() {
   return (
     <main className="poster-page max-w-7xl">
       <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
-        DEBUG CLUB PAGE ACTIVE
+        DEBUG REAL CLUB HOME
       </div>
       <div className="mb-4 border-4 border-blue-700 bg-blue-100 px-4 py-3 text-base font-black tracking-[0.08em] text-blue-800">
         {routingDecision}
