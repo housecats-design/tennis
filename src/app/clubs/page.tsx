@@ -13,225 +13,327 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { Club, ClubApplication, ClubMember, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+
+type DebugState = {
+  authUser: unknown;
+  authUserId: string | null;
+  authUserEmail: string | null;
+  clubMembersRaw: unknown;
+  clubsRaw: unknown;
+  routingDecision: string;
+};
 
 export default function ClubsPage() {
   const router = useRouter();
   const isDev = process.env.NODE_ENV === "development";
+
+  const [authReady, setAuthReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [redirecting, setRedirecting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [memberships, setMemberships] = useState<ClubMember[]>([]);
   const [applications, setApplications] = useState<ClubApplication[]>([]);
+
   const [clubName, setClubName] = useState("");
   const [region, setRegion] = useState("");
   const [description, setDescription] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [redirecting, setRedirecting] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [debugAuthUser, setDebugAuthUser] = useState<unknown>(null);
-  const [debugMembershipRows, setDebugMembershipRows] = useState<unknown>(null);
-  const [debugClubsRows, setDebugClubsRows] = useState<unknown>(null);
-  const [debugRoutingDecision, setDebugRoutingDecision] = useState<string>("초기화 전");
+
+  const [debugState, setDebugState] = useState<DebugState>({
+    authUser: null,
+    authUserId: null,
+    authUserEmail: null,
+    clubMembersRaw: null,
+    clubsRaw: null,
+    routingDecision: "초기화 전",
+  });
 
   useEffect(() => {
-    const load = async () => {
-      let shouldKeepLoading = false;
+    const supabase = getSupabaseClient();
+
+    const hydrateAuth = async () => {
+      setAuthReady(false);
+      setLoading(true);
       setLoadError(null);
-      setDebugRoutingDecision("로딩 중");
-      try {
-        const supabase = getSupabaseClient();
-        const authResult = supabase ? await supabase.auth.getUser() : { data: { user: null }, error: null };
-        setDebugAuthUser(authResult.data.user ?? null);
-        console.info("[clubs-routing] auth user object", authResult.data.user ?? null);
-        if (authResult.error) {
-          console.error("[clubs-routing] auth user fetch failed", authResult.error);
-        }
+      setRedirecting(false);
+      setDebugState((current) => ({
+        ...current,
+        routingDecision: "인증 상태 확인 중",
+      }));
 
-        const nextProfile = await getCurrentProfile({ forceRefresh: true });
-        setProfile(nextProfile);
-        console.info("[clubs-routing] auth user", {
-          authUserId: authResult.data.user?.id ?? null,
-          userId: nextProfile?.id ?? null,
-          email: nextProfile?.email ?? null,
-        });
-
-        let nextMemberships: ClubMember[] = [];
-        let nextClubs: Club[] = [];
-        if (nextProfile?.id) {
-          const membershipPromise = supabase
-            ? supabase
-                .from("club_members")
-                .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
-                .eq("user_id", nextProfile.id)
-                .is("deleted_at", null)
-                .eq("is_active", true)
-                .order("joined_at", { ascending: false })
-            : Promise.resolve({ data: [], error: null });
-          const clubsPromise = supabase
-            ? supabase
-                .from("clubs")
-                .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
-                .is("deleted_at", null)
-                .eq("is_active", true)
-                .in("status", ["active", "approved"])
-                .order("created_at", { ascending: false })
-            : Promise.resolve({ data: [], error: null });
-
-          const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
-            membershipPromise,
-            clubsPromise,
-            listMyClubApplications(nextProfile.id),
-          ]);
-
-          if (membershipResult.status === "fulfilled") {
-            setDebugMembershipRows(membershipResult.value.data ?? null);
-            if (membershipResult.value.error) {
-              console.error("[clubs-routing] club_members query error", membershipResult.value.error);
-              setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-            } else {
-              nextMemberships = (membershipResult.value.data ?? []).map((membershipRow) =>
-                normalizeClubMember({
-                  id: membershipRow.id,
-                  clubId: membershipRow.club_id,
-                  userId: membershipRow.user_id,
-                  role: membershipRow.role,
-                  membershipStatus: membershipRow.membership_status,
-                  joinedAt: membershipRow.joined_at ?? new Date().toISOString(),
-                  approvedBy: membershipRow.approved_by ?? null,
-                  approvedAt: membershipRow.approved_at ?? null,
-                  leftAt: membershipRow.left_at ?? null,
-                  isActive: membershipRow.is_active ?? true,
-                  deletedAt: membershipRow.deleted_at ?? null,
-                }),
-              );
-            }
-            console.info("[clubs-routing] club_members", {
-              userId: nextProfile.id,
-              rawCount: membershipResult.value.data?.length ?? 0,
-              count: nextMemberships.length,
-              memberships: nextMemberships.map((membership) => ({
-                clubId: membership.clubId,
-                role: membership.role,
-                isActive: membership.isActive,
-                deletedAt: membership.deletedAt,
-              })),
-            });
-          } else {
-            console.error("[clubs-routing] club_members fetch failed", membershipResult.reason);
-            setDebugMembershipRows({ error: String(membershipResult.reason) });
-            setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-          }
-
-          if (clubsResult.status === "fulfilled") {
-            setDebugClubsRows(clubsResult.value.data ?? null);
-            if (clubsResult.value.error) {
-              console.error("[clubs-routing] clubs query error", clubsResult.value.error);
-              setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-            } else {
-              nextClubs = (clubsResult.value.data ?? []).map((clubRow) =>
-                normalizeClub({
-                  id: clubRow.id,
-                  clubName: clubRow.club_name,
-                  region: clubRow.region ?? null,
-                  description: clubRow.description ?? null,
-                  visibility: clubRow.visibility ?? "public",
-                  createdByUserId: clubRow.created_by_user_id,
-                  status: clubRow.status ?? "active",
-                  approvedBy: clubRow.approved_by ?? null,
-                  approvedAt: clubRow.approved_at ?? null,
-                  isActive: clubRow.is_active ?? true,
-                  deletedAt: clubRow.deleted_at ?? null,
-                  createdAt: clubRow.created_at ?? new Date().toISOString(),
-                  updatedAt: clubRow.updated_at ?? new Date().toISOString(),
-                }),
-              );
-              setClubs(nextClubs);
-            }
-            console.info("[clubs-routing] clubs", {
-              rawCount: clubsResult.value.data?.length ?? 0,
-              count: nextClubs.length,
-              clubs: nextClubs.map((club) => ({
-                id: club.id,
-                clubName: club.clubName,
-                visibility: club.visibility ?? "public",
-              })),
-            });
-          } else {
-            console.error("[clubs-routing] clubs fetch failed", clubsResult.reason);
-            setDebugClubsRows({ error: String(clubsResult.reason) });
-            setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-          }
-
-          if (applicationResult.status === "fulfilled") {
-            setApplications(applicationResult.value);
-          } else {
-            console.error("[clubs-routing] club applications fetch failed", applicationResult.reason);
-          }
-
-          setMemberships(nextMemberships);
-          const defaultMembership = [...nextMemberships]
-            .filter((membership) => isActiveClubMembership(membership))
-            .sort((left, right) => {
-              const leftPriority = left.role === "owner" ? 0 : left.role === "manager" ? 1 : 2;
-              const rightPriority = right.role === "owner" ? 0 : right.role === "manager" ? 1 : 2;
-              if (leftPriority !== rightPriority) {
-                return leftPriority - rightPriority;
-              }
-              return new Date(right.joinedAt).getTime() - new Date(left.joinedAt).getTime();
-            })[0];
-
-          if (defaultMembership) {
-            setDebugRoutingDecision(`내 클럽 홈으로 이동: ${defaultMembership.clubId}`);
-            shouldKeepLoading = true;
-            setRedirecting(true);
-            router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
-            return;
-          }
-          setDebugRoutingDecision("클럽 탐색 화면 유지");
-        } else {
-          setMemberships([]);
-          setApplications([]);
-          setDebugMembershipRows([]);
-          try {
-            nextClubs = await listActiveClubs({ strict: true });
-            setClubs(nextClubs);
-            setDebugClubsRows(nextClubs);
-            console.info("[clubs-routing] clubs", {
-              count: nextClubs.length,
-              clubs: nextClubs.map((club) => ({
-                id: club.id,
-                clubName: club.clubName,
-                visibility: club.visibility ?? "public",
-              })),
-            });
-          } catch (clubError) {
-            console.error("[clubs-routing] clubs fetch failed", clubError);
-            setDebugClubsRows({ error: clubError instanceof Error ? clubError.message : String(clubError) });
-            setLoadError("클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-          }
-          setDebugRoutingDecision("비로그인 또는 클럽 없음: 탐색 화면");
-        }
-      } finally {
-        if (!shouldKeepLoading) {
-          setLoading(false);
-        }
+      if (!supabase) {
+        setProfile(null);
+        setDebugState((current) => ({
+          ...current,
+          authUser: null,
+          authUserId: null,
+          authUserEmail: null,
+        }));
+        setAuthReady(true);
+        return;
       }
+
+      const authResult = await supabase.auth.getUser();
+      const authUser = authResult.data.user ?? null;
+      console.info("[clubs-routing] auth user object", authUser);
+      if (authResult.error) {
+        console.error("[clubs-routing] auth user fetch failed", authResult.error);
+      }
+
+      setDebugState((current) => ({
+        ...current,
+        authUser,
+        authUserId: authUser?.id ?? null,
+        authUserEmail: authUser?.email ?? null,
+      }));
+
+      if (!authUser?.id) {
+        setProfile(null);
+        setAuthReady(true);
+        return;
+      }
+
+      const nextProfile = await getCurrentProfile({ forceRefresh: true });
+      setProfile(nextProfile);
+      console.info("[clubs-routing] auth user", {
+        authUserId: authUser.id,
+        userId: nextProfile?.id ?? null,
+        email: nextProfile?.email ?? authUser.email ?? null,
+      });
+      setAuthReady(true);
     };
 
-    void load();
+    void hydrateAuth();
 
-    const supabase = getSupabaseClient();
-    const authSubscription = supabase?.auth.onAuthStateChange(() => {
-      void load();
+    const subscription = supabase?.auth.onAuthStateChange(() => {
+      void hydrateAuth();
     });
 
     return () => {
-      authSubscription?.data.subscription.unsubscribe();
+      subscription?.data.subscription.unsubscribe();
     };
-  }, [router]);
+  }, []);
+
+  useEffect(() => {
+    const loadClubPageData = async () => {
+      if (!authReady) {
+        return;
+      }
+
+      setLoading(true);
+      setLoadError(null);
+      setDebugState((current) => ({
+        ...current,
+        routingDecision: "클럽 데이터 불러오는 중",
+      }));
+
+      const supabase = getSupabaseClient();
+      let nextMemberships: ClubMember[] = [];
+      let nextClubs: Club[] = [];
+
+      if (profile?.id && supabase) {
+        const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
+          supabase
+            .from("club_members")
+            .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+            .eq("user_id", profile.id)
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .order("joined_at", { ascending: false }),
+          supabase
+            .from("clubs")
+            .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .in("status", ["active", "approved"])
+            .order("created_at", { ascending: false }),
+          listMyClubApplications(profile.id),
+        ]);
+
+        if (membershipResult.status === "fulfilled") {
+          setDebugState((current) => ({
+            ...current,
+            clubMembersRaw: membershipResult.value.data ?? membershipResult.value.error ?? null,
+          }));
+          if (membershipResult.value.error) {
+            console.error("[clubs-routing] club_members query error", membershipResult.value.error);
+            setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+          } else {
+            nextMemberships = (membershipResult.value.data ?? []).map((membershipRow) =>
+              normalizeClubMember({
+                id: membershipRow.id,
+                clubId: membershipRow.club_id,
+                userId: membershipRow.user_id,
+                role: membershipRow.role,
+                membershipStatus: membershipRow.membership_status,
+                joinedAt: membershipRow.joined_at ?? new Date().toISOString(),
+                approvedBy: membershipRow.approved_by ?? null,
+                approvedAt: membershipRow.approved_at ?? null,
+                leftAt: membershipRow.left_at ?? null,
+                isActive: membershipRow.is_active ?? true,
+                deletedAt: membershipRow.deleted_at ?? null,
+              }),
+            );
+          }
+          console.info("[clubs-routing] club_members", {
+            userId: profile.id,
+            rawCount: membershipResult.value.data?.length ?? 0,
+            count: nextMemberships.length,
+            memberships: nextMemberships.map((membership) => ({
+              clubId: membership.clubId,
+              role: membership.role,
+              isActive: membership.isActive,
+              deletedAt: membership.deletedAt,
+            })),
+          });
+        } else {
+          console.error("[clubs-routing] club_members fetch failed", membershipResult.reason);
+          setDebugState((current) => ({
+            ...current,
+            clubMembersRaw: { error: String(membershipResult.reason) },
+          }));
+          setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+
+        if (clubsResult.status === "fulfilled") {
+          setDebugState((current) => ({
+            ...current,
+            clubsRaw: clubsResult.value.data ?? clubsResult.value.error ?? null,
+          }));
+          if (clubsResult.value.error) {
+            console.error("[clubs-routing] clubs query error", clubsResult.value.error);
+            setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+          } else {
+            nextClubs = (clubsResult.value.data ?? []).map((clubRow) =>
+              normalizeClub({
+                id: clubRow.id,
+                clubName: clubRow.club_name,
+                region: clubRow.region ?? null,
+                description: clubRow.description ?? null,
+                visibility: clubRow.visibility ?? "public",
+                createdByUserId: clubRow.created_by_user_id,
+                status: clubRow.status ?? "active",
+                approvedBy: clubRow.approved_by ?? null,
+                approvedAt: clubRow.approved_at ?? null,
+                isActive: clubRow.is_active ?? true,
+                deletedAt: clubRow.deleted_at ?? null,
+                createdAt: clubRow.created_at ?? new Date().toISOString(),
+                updatedAt: clubRow.updated_at ?? new Date().toISOString(),
+              }),
+            );
+          }
+          console.info("[clubs-routing] clubs", {
+            rawCount: clubsResult.value.data?.length ?? 0,
+            count: nextClubs.length,
+            clubs: nextClubs.map((club) => ({
+              id: club.id,
+              clubName: club.clubName,
+              visibility: club.visibility ?? "public",
+            })),
+          });
+        } else {
+          console.error("[clubs-routing] clubs fetch failed", clubsResult.reason);
+          setDebugState((current) => ({
+            ...current,
+            clubsRaw: { error: String(clubsResult.reason) },
+          }));
+          setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+
+        if (applicationResult.status === "fulfilled") {
+          setApplications(applicationResult.value);
+        } else {
+          console.error("[clubs-routing] club applications fetch failed", applicationResult.reason);
+        }
+      } else {
+        try {
+          nextClubs = await listActiveClubs({ strict: true });
+          setDebugState((current) => ({
+            ...current,
+            clubsRaw: nextClubs,
+          }));
+          console.info("[clubs-routing] clubs", {
+            count: nextClubs.length,
+            clubs: nextClubs.map((club) => ({
+              id: club.id,
+              clubName: club.clubName,
+              visibility: club.visibility ?? "public",
+            })),
+          });
+        } catch (clubError) {
+          console.error("[clubs-routing] clubs fetch failed", clubError);
+          setDebugState((current) => ({
+            ...current,
+            clubsRaw: { error: clubError instanceof Error ? clubError.message : String(clubError) },
+          }));
+          setLoadError("클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+        setMemberships([]);
+        setApplications([]);
+        setDebugState((current) => ({
+          ...current,
+          clubMembersRaw: [],
+        }));
+      }
+
+      setMemberships(nextMemberships);
+      setClubs(nextClubs);
+
+      const defaultMembership = [...nextMemberships]
+        .filter((membership) => isActiveClubMembership(membership))
+        .sort((left, right) => {
+          const leftPriority = left.role === "owner" ? 0 : left.role === "manager" ? 1 : 2;
+          const rightPriority = right.role === "owner" ? 0 : right.role === "manager" ? 1 : 2;
+          if (leftPriority !== rightPriority) {
+            return leftPriority - rightPriority;
+          }
+          return new Date(right.joinedAt).getTime() - new Date(left.joinedAt).getTime();
+        })[0];
+
+      if (defaultMembership) {
+        setDebugState((current) => ({
+          ...current,
+          routingDecision: `내 클럽 홈으로 이동: ${defaultMembership.clubId}`,
+        }));
+        setRedirecting(true);
+        router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
+        return;
+      }
+
+      setDebugState((current) => ({
+        ...current,
+        routingDecision: profile?.id ? "클럽 탐색 화면 유지" : "비로그인: 클럽 탐색 화면 유지",
+      }));
+      setLoading(false);
+    };
+
+    void loadClubPageData();
+  }, [authReady, profile?.id, router]);
+
+  const myClubs = useMemo(() => {
+    const joinedClubIds = new Set(
+      memberships
+        .filter((membership) => isActiveClubMembership(membership))
+        .map((membership) => membership.clubId),
+    );
+    return clubs.filter((club) => joinedClubIds.has(club.id));
+  }, [clubs, memberships]);
+
+  useEffect(() => {
+    console.info("[clubs-routing] render state", {
+      myClubs: myClubs.map((club) => ({ id: club.id, clubName: club.clubName })),
+      discoveryClubs: clubs.map((club) => ({ id: club.id, clubName: club.clubName, visibility: club.visibility ?? "public" })),
+      loading,
+      error: loadError,
+    });
+  }, [clubs, loadError, loading, myClubs]);
 
   async function handleSubmitApplication(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -262,38 +364,32 @@ export default function ClubsPage() {
     }
   }
 
-  const joinedClubIds = new Set(
-    memberships
-      .filter((membership) => isActiveClubMembership(membership))
-      .map((membership) => membership.clubId),
-  );
-
-  const myClubs = clubs.filter((club) => joinedClubIds.has(club.id));
-
-  useEffect(() => {
-    console.info("[clubs-routing] render state", {
-      myClubs: myClubs.map((club) => ({ id: club.id, clubName: club.clubName })),
-      discoveryClubs: clubs.map((club) => ({ id: club.id, clubName: club.clubName, visibility: club.visibility ?? "public" })),
-      loading,
-      error: loadError,
-    });
-  }, [clubs, loadError, loading, myClubs]);
-
-  if (loading || redirecting) {
+  if (!authReady || loading || redirecting) {
     return (
       <main className="poster-page max-w-5xl text-sm text-ink/70">
         <div>클럽 화면을 불러오는 중...</div>
         {isDev ? (
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
             <div className="font-bold">클럽 디버그</div>
-            <div>auth user id: {profile?.id ?? (debugAuthUser && typeof debugAuthUser === "object" && debugAuthUser !== null && "id" in (debugAuthUser as Record<string, unknown>) ? String((debugAuthUser as Record<string, unknown>).id ?? "") : "-")}</div>
-            <div>auth user email: {profile?.email ?? (debugAuthUser && typeof debugAuthUser === "object" && debugAuthUser !== null && "email" in (debugAuthUser as Record<string, unknown>) ? String((debugAuthUser as Record<string, unknown>).email ?? "") : "-")}</div>
+            <div>auth ready: {String(authReady)}</div>
+            <div>auth user id: {debugState.authUserId ?? "-"}</div>
+            <div>auth user email: {debugState.authUserEmail ?? "-"}</div>
             <div>loading: {String(loading)}</div>
             <div>error: {loadError ?? "-"}</div>
-            <div>routing: {debugRoutingDecision}</div>
+            <div>routing: {debugState.routingDecision}</div>
             <div>myClubs length: {myClubs.length}</div>
             <div>discoveryClubs length: {clubs.length}</div>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify({ clubMembers: debugMembershipRows, clubs: debugClubsRows }, null, 2)}</pre>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+              {JSON.stringify(
+                {
+                  authUser: debugState.authUser,
+                  clubMembers: debugState.clubMembersRaw,
+                  clubs: debugState.clubsRaw,
+                },
+                null,
+                2,
+              )}
+            </pre>
           </div>
         ) : null}
       </main>
@@ -318,14 +414,25 @@ export default function ClubsPage() {
         {isDev ? (
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
             <div className="font-bold">클럽 디버그</div>
-            <div>auth user id: {profile?.id ?? "-"}</div>
-            <div>auth user email: {profile?.email ?? "-"}</div>
+            <div>auth ready: {String(authReady)}</div>
+            <div>auth user id: {debugState.authUserId ?? "-"}</div>
+            <div>auth user email: {debugState.authUserEmail ?? "-"}</div>
             <div>loading: {String(loading)}</div>
             <div>error: {loadError ?? "-"}</div>
-            <div>routing: {debugRoutingDecision}</div>
+            <div>routing: {debugState.routingDecision}</div>
             <div>myClubs length: {myClubs.length}</div>
             <div>discoveryClubs length: {clubs.length}</div>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify({ clubMembers: debugMembershipRows, clubs: debugClubsRows }, null, 2)}</pre>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+              {JSON.stringify(
+                {
+                  authUser: debugState.authUser,
+                  clubMembers: debugState.clubMembersRaw,
+                  clubs: debugState.clubsRaw,
+                },
+                null,
+                2,
+              )}
+            </pre>
           </div>
         ) : null}
       </section>
