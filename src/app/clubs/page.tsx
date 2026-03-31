@@ -5,7 +5,8 @@ import {
   isActiveClubMembership,
   listActiveClubs,
   listMyClubApplications,
-  listMyClubMemberships,
+  normalizeClub,
+  normalizeClubMember,
   submitClubApplication,
 } from "@/lib/clubs";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -35,9 +36,17 @@ export default function ClubsPage() {
       let shouldKeepLoading = false;
       setLoadError(null);
       try {
+        const supabase = getSupabaseClient();
+        const authResult = supabase ? await supabase.auth.getUser() : { data: { user: null }, error: null };
+        console.info("[clubs-routing] auth user object", authResult.data.user ?? null);
+        if (authResult.error) {
+          console.error("[clubs-routing] auth user fetch failed", authResult.error);
+        }
+
         const nextProfile = await getCurrentProfile({ forceRefresh: true });
         setProfile(nextProfile);
         console.info("[clubs-routing] auth user", {
+          authUserId: authResult.data.user?.id ?? null,
           userId: nextProfile?.id ?? null,
           email: nextProfile?.email ?? null,
         });
@@ -45,16 +54,55 @@ export default function ClubsPage() {
         let nextMemberships: ClubMember[] = [];
         let nextClubs: Club[] = [];
         if (nextProfile?.id) {
+          const membershipPromise = supabase
+            ? supabase
+                .from("club_members")
+                .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+                .eq("user_id", nextProfile.id)
+                .is("deleted_at", null)
+                .eq("is_active", true)
+                .order("joined_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null });
+          const clubsPromise = supabase
+            ? supabase
+                .from("clubs")
+                .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+                .is("deleted_at", null)
+                .eq("is_active", true)
+                .in("status", ["active", "approved"])
+                .order("created_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null });
+
           const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
-            listMyClubMemberships(nextProfile.id, { strict: true }),
-            listActiveClubs({ strict: true }),
+            membershipPromise,
+            clubsPromise,
             listMyClubApplications(nextProfile.id),
           ]);
 
           if (membershipResult.status === "fulfilled") {
-            nextMemberships = membershipResult.value;
+            if (membershipResult.value.error) {
+              console.error("[clubs-routing] club_members query error", membershipResult.value.error);
+              setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+            } else {
+              nextMemberships = (membershipResult.value.data ?? []).map((membershipRow) =>
+                normalizeClubMember({
+                  id: membershipRow.id,
+                  clubId: membershipRow.club_id,
+                  userId: membershipRow.user_id,
+                  role: membershipRow.role,
+                  membershipStatus: membershipRow.membership_status,
+                  joinedAt: membershipRow.joined_at ?? new Date().toISOString(),
+                  approvedBy: membershipRow.approved_by ?? null,
+                  approvedAt: membershipRow.approved_at ?? null,
+                  leftAt: membershipRow.left_at ?? null,
+                  isActive: membershipRow.is_active ?? true,
+                  deletedAt: membershipRow.deleted_at ?? null,
+                }),
+              );
+            }
             console.info("[clubs-routing] club_members", {
               userId: nextProfile.id,
+              rawCount: membershipResult.value.data?.length ?? 0,
               count: nextMemberships.length,
               memberships: nextMemberships.map((membership) => ({
                 clubId: membership.clubId,
@@ -69,9 +117,31 @@ export default function ClubsPage() {
           }
 
           if (clubsResult.status === "fulfilled") {
-            nextClubs = clubsResult.value;
-            setClubs(nextClubs);
+            if (clubsResult.value.error) {
+              console.error("[clubs-routing] clubs query error", clubsResult.value.error);
+              setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+            } else {
+              nextClubs = (clubsResult.value.data ?? []).map((clubRow) =>
+                normalizeClub({
+                  id: clubRow.id,
+                  clubName: clubRow.club_name,
+                  region: clubRow.region ?? null,
+                  description: clubRow.description ?? null,
+                  visibility: clubRow.visibility ?? "public",
+                  createdByUserId: clubRow.created_by_user_id,
+                  status: clubRow.status ?? "active",
+                  approvedBy: clubRow.approved_by ?? null,
+                  approvedAt: clubRow.approved_at ?? null,
+                  isActive: clubRow.is_active ?? true,
+                  deletedAt: clubRow.deleted_at ?? null,
+                  createdAt: clubRow.created_at ?? new Date().toISOString(),
+                  updatedAt: clubRow.updated_at ?? new Date().toISOString(),
+                }),
+              );
+              setClubs(nextClubs);
+            }
             console.info("[clubs-routing] clubs", {
+              rawCount: clubsResult.value.data?.length ?? 0,
               count: nextClubs.length,
               clubs: nextClubs.map((club) => ({
                 id: club.id,
@@ -182,6 +252,15 @@ export default function ClubsPage() {
   );
 
   const myClubs = clubs.filter((club) => joinedClubIds.has(club.id));
+
+  useEffect(() => {
+    console.info("[clubs-routing] render state", {
+      myClubs: myClubs.map((club) => ({ id: club.id, clubName: club.clubName })),
+      discoveryClubs: clubs.map((club) => ({ id: club.id, clubName: club.clubName, visibility: club.visibility ?? "public" })),
+      loading,
+      error: loadError,
+    });
+  }, [clubs, loadError, loading, myClubs]);
 
   if (loading || redirecting) {
     return <main className="poster-page max-w-5xl text-sm text-ink/70">클럽 화면을 불러오는 중...</main>;
