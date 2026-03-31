@@ -140,7 +140,7 @@ export default function ClubDetailPage() {
     }
   }
 
-  async function handleRoleChange(targetUserId: string, role: "vice_leader" | "member"): Promise<void> {
+  async function handleRoleChange(targetUserId: string, role: "manager" | "member"): Promise<void> {
     if (!profile) {
       return;
     }
@@ -156,7 +156,7 @@ export default function ClubDetailPage() {
         role,
       });
       setClubMembers(await listClubMembers(clubId));
-      setInfo(role === "vice_leader" ? "부리더로 지정했습니다." : "일반 회원 역할로 변경했습니다.");
+      setInfo(role === "manager" ? "부클럽장으로 지정했습니다." : "일반 회원 역할로 변경했습니다.");
     } catch (roleError) {
       setError(roleError instanceof Error ? roleError.message : "역할 변경에 실패했습니다.");
     } finally {
@@ -263,13 +263,13 @@ export default function ClubDetailPage() {
                 <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3 text-sm">
                   <div>
                     <div className="font-semibold">{getUserLabel(member.userId)}</div>
-                    <div className="mt-1 text-xs text-ink/60">{member.role === "leader" ? "리더" : member.role === "vice_leader" ? "부리더" : "회원"}</div>
+                    <div className="mt-1 text-xs text-ink/60">{member.role === "owner" ? "클럽장" : member.role === "manager" ? "부클럽장" : "회원"}</div>
                   </div>
-                  {canApproveRequests && member.role !== "leader" ? (
+                  {canApproveRequests && member.role !== "owner" ? (
                     <div className="flex gap-2">
-                      {member.role !== "vice_leader" ? (
-                        <button type="button" onClick={() => void handleRoleChange(member.userId, "vice_leader")} className="poster-button-secondary text-xs">
-                          부리더 지정
+                      {member.role !== "manager" ? (
+                        <button type="button" onClick={() => void handleRoleChange(member.userId, "manager")} className="poster-button-secondary text-xs">
+                          부클럽장 지정
                         </button>
                       ) : (
                         <button type="button" onClick={() => void handleRoleChange(member.userId, "member")} className="poster-button-secondary text-xs">
@@ -289,7 +289,7 @@ export default function ClubDetailPage() {
         ) : null}
       </section>
 
-      {currentClubMembership?.role === "leader" ? (
+      {currentClubMembership?.role === "owner" ? (
         <section className="border-t border-line py-8">
           <h2 className="text-2xl font-black">클럽 설정</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-[220px_auto] sm:items-end">

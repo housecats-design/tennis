@@ -46,8 +46,8 @@ export default function ClubsPage() {
           const defaultMembership = [...nextMemberships]
             .filter((membership) => isActiveClubMembership(membership))
             .sort((left, right) => {
-              const leftPriority = left.role === "leader" ? 0 : left.role === "vice_leader" ? 1 : 2;
-              const rightPriority = right.role === "leader" ? 0 : right.role === "vice_leader" ? 1 : 2;
+              const leftPriority = left.role === "owner" ? 0 : left.role === "manager" ? 1 : 2;
+              const rightPriority = right.role === "owner" ? 0 : right.role === "manager" ? 1 : 2;
               if (leftPriority !== rightPriority) {
                 return leftPriority - rightPriority;
               }

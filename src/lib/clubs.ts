@@ -150,7 +150,13 @@ function normalizeJoinRequestStatus(status?: string | null): ClubJoinRequest["st
 }
 
 function normalizeClubRole(role?: string | null): ClubRole {
-  return role === "leader" || role === "vice_leader" ? role : "member";
+  if (role === "owner" || role === "leader") {
+    return "owner";
+  }
+  if (role === "manager" || role === "vice_leader") {
+    return "manager";
+  }
+  return "member";
 }
 
 function normalizeClubVisibility(visibility?: string | null): ClubVisibility {
@@ -258,15 +264,15 @@ function loadCachedJoinRequests(): ClubJoinRequest[] {
 }
 
 export function isClubOperatorRole(role: ClubRole): boolean {
-  return role === "leader" || role === "vice_leader";
+  return role === "owner" || role === "manager";
 }
 
 export function canApproveClubJoinRequests(role: ClubRole): boolean {
-  return role === "leader";
+  return role === "owner";
 }
 
 export function canCreateClubEvent(role: ClubRole): boolean {
-  return role === "leader" || role === "vice_leader";
+  return role === "owner" || role === "manager";
 }
 
 export function isActiveClubMembership(member: ClubMember | null | undefined): boolean {
@@ -282,10 +288,10 @@ export function isActiveClubMembership(member: ClubMember | null | undefined): b
 }
 
 function getClubRolePriority(role: ClubRole): number {
-  if (role === "leader") {
+  if (role === "owner") {
     return 0;
   }
-  if (role === "vice_leader") {
+  if (role === "manager") {
     return 1;
   }
   return 2;
@@ -643,10 +649,10 @@ export async function updateClubMemberRole(input: {
   clubId: string;
   actorUserId: string;
   targetUserId: string;
-  role: "vice_leader" | "member";
+  role: "manager" | "member";
 }): Promise<ClubMember> {
   const actorMembership = await getClubMembership(input.clubId, input.actorUserId);
-  if (!actorMembership || actorMembership.membershipStatus !== "approved" || actorMembership.role !== "leader") {
+  if (!actorMembership || actorMembership.membershipStatus !== "approved" || actorMembership.role !== "owner") {
     throw new Error("운영진 역할을 변경할 권한이 없습니다.");
   }
 
@@ -837,7 +843,7 @@ export async function updateClubVisibility(input: {
   visibility: ClubVisibility;
 }): Promise<Club> {
   const actorMembership = await getClubMembership(input.clubId, input.actorUserId);
-  if (!actorMembership || actorMembership.membershipStatus !== "approved" || actorMembership.role !== "leader") {
+  if (!actorMembership || actorMembership.membershipStatus !== "approved" || actorMembership.role !== "owner") {
     throw new Error("클럽 공개 여부를 변경할 권한이 없습니다.");
   }
 
@@ -1007,7 +1013,7 @@ async function ensureLeaderMembershipForClub(input: {
     id: makeId("club_member"),
     clubId: input.clubId,
     userId: input.applicantUserId,
-    role: "leader",
+    role: "owner",
     membershipStatus: "approved",
     approvedBy: input.reviewerUserId,
     approvedAt: input.reviewedAt ?? new Date().toISOString(),
@@ -1188,7 +1194,7 @@ export async function reviewClubApplication(input: {
       id: makeId("club_member"),
       clubId: createdClub.id,
       userId: target.applicantUserId,
-      role: "leader",
+      role: "owner",
       membershipStatus: "approved",
       approvedBy: input.reviewerUserId,
       approvedAt: reviewedAt,

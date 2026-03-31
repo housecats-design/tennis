@@ -129,7 +129,7 @@ export default function ClubHomePage() {
             ))}
           </select>
           <div className="text-xs text-ink/55">
-            내 역할: {selectedMembership?.role === "leader" ? "클럽장" : selectedMembership?.role === "vice_leader" ? "부클럽장" : "회원"}
+            내 역할: {selectedMembership?.role === "owner" ? "클럽장" : selectedMembership?.role === "manager" ? "부클럽장" : "회원"}
           </div>
         </div>
       </section>
