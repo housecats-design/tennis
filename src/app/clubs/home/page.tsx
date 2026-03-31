@@ -1,6 +1,7 @@
 "use client";
 
 import { getCurrentProfile } from "@/lib/auth";
+import { getSupabaseClient } from "@/lib/supabase";
 import { buildClubHomeData, canApproveClubJoinRequests, canCreateClubEvent, listMyApprovedClubs } from "@/lib/clubs";
 import { Club, ClubMember, UserProfile } from "@/lib/types";
 import Link from "next/link";
@@ -28,14 +29,19 @@ export default function ClubHomePage() {
 
   useEffect(() => {
     const load = async () => {
-      const nextProfile = await getCurrentProfile();
+      const supabase = getSupabaseClient();
+      const authResult = await supabase?.auth.getUser();
+      const authUser = authResult?.data.user ?? null;
+      const authUserId = authUser?.id ?? null;
+      const nextProfile = await getCurrentProfile({ forceRefresh: true });
       setProfile(nextProfile);
-      if (!nextProfile?.id) {
+
+      if (!authUserId) {
         setLoading(false);
         return;
       }
 
-      const nextClubs = await listMyApprovedClubs(nextProfile.id);
+      const nextClubs = await listMyApprovedClubs(authUserId);
       setMyClubs(nextClubs);
       const requestedClubId =
         typeof window !== "undefined"
