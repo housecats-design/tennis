@@ -281,15 +281,38 @@ export function isActiveClubMembership(member: ClubMember | null | undefined): b
   return member.isActive !== false;
 }
 
+function getClubRolePriority(role: ClubRole): number {
+  if (role === "leader") {
+    return 0;
+  }
+  if (role === "vice_leader") {
+    return 1;
+  }
+  return 2;
+}
+
+export function sortClubMembershipsForDefault<T extends { membership: ClubMember }>(items: T[]): T[] {
+  return [...items].sort((left, right) => {
+    const rolePriorityDiff = getClubRolePriority(left.membership.role) - getClubRolePriority(right.membership.role);
+    if (rolePriorityDiff !== 0) {
+      return rolePriorityDiff;
+    }
+
+    return new Date(right.membership.joinedAt).getTime() - new Date(left.membership.joinedAt).getTime();
+  });
+}
+
 export async function listMyApprovedClubs(userId: string): Promise<Array<{ club: Club; membership: ClubMember }>> {
   const memberships = await listMyClubMemberships(userId);
   const approvedMemberships = memberships.filter(
     (membership) => isActiveClubMembership(membership),
   );
   const clubs = await Promise.all(approvedMemberships.map((membership) => getClubById(membership.clubId)));
-  return approvedMemberships
+  return sortClubMembershipsForDefault(
+    approvedMemberships
     .map((membership, index) => ({ club: clubs[index], membership }))
-    .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club));
+    .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
+  );
 }
 
 export async function listClubApplicationsForUser(userId: string): Promise<ClubApplication[]> {

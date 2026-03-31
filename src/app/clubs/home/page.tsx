@@ -37,7 +37,14 @@ export default function ClubHomePage() {
 
       const nextClubs = await listMyApprovedClubs(nextProfile.id);
       setMyClubs(nextClubs);
-      const defaultClubId = nextClubs[0]?.club.id ?? "";
+      const requestedClubId =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("clubId")
+          : null;
+      const defaultClubId =
+        (requestedClubId && nextClubs.find((item) => item.club.id === requestedClubId)?.club.id) ||
+        nextClubs[0]?.club.id ||
+        "";
       setSelectedClubId(defaultClubId);
       if (defaultClubId) {
         setClubData(await buildClubHomeData(defaultClubId));

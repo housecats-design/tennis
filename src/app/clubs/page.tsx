@@ -43,11 +43,21 @@ export default function ClubsPage() {
           ]);
           setMemberships(nextMemberships);
           setApplications(nextApplications);
-          const hasApprovedClub = nextMemberships.some((membership) => isActiveClubMembership(membership));
-          if (hasApprovedClub) {
+          const defaultMembership = [...nextMemberships]
+            .filter((membership) => isActiveClubMembership(membership))
+            .sort((left, right) => {
+              const leftPriority = left.role === "leader" ? 0 : left.role === "vice_leader" ? 1 : 2;
+              const rightPriority = right.role === "leader" ? 0 : right.role === "vice_leader" ? 1 : 2;
+              if (leftPriority !== rightPriority) {
+                return leftPriority - rightPriority;
+              }
+              return new Date(right.joinedAt).getTime() - new Date(left.joinedAt).getTime();
+            })[0];
+
+          if (defaultMembership) {
             shouldKeepLoading = true;
             setRedirecting(true);
-            router.replace("/clubs/home");
+            router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
             return;
           }
         }
