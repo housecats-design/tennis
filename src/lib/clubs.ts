@@ -685,7 +685,7 @@ export async function updateClubMemberRole(input: {
   return nextMembership;
 }
 
-export async function listActiveClubs(): Promise<Club[]> {
+export async function listActiveClubs(options?: { strict?: boolean }): Promise<Club[]> {
   if (!isSupabaseEnabled()) {
     return loadCachedClubs().filter(
       (club) => club.deletedAt == null && club.isActive !== false && club.status !== "rejected" && club.status !== "pending",
@@ -705,6 +705,9 @@ export async function listActiveClubs(): Promise<Club[]> {
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
+    if (options?.strict) {
+      throw new Error(error?.message || "클럽 목록을 불러오지 못했습니다.");
+    }
     if (shouldFallbackToLocal(error)) {
       return loadCachedClubs().filter(
         (club) => club.deletedAt == null && club.isActive !== false && club.status !== "rejected" && club.status !== "pending",
@@ -862,7 +865,7 @@ export async function updateClubVisibility(input: {
   return nextClub;
 }
 
-export async function listMyClubMemberships(userId: string): Promise<ClubMember[]> {
+export async function listMyClubMemberships(userId: string, options?: { strict?: boolean }): Promise<ClubMember[]> {
   if (!userId) {
     return [];
   }
@@ -882,6 +885,9 @@ export async function listMyClubMemberships(userId: string): Promise<ClubMember[
     .order("joined_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
+    if (options?.strict) {
+      throw new Error(error?.message || "클럽 멤버십을 불러오지 못했습니다.");
+    }
     if (shouldFallbackToLocal(error)) {
       return loadCachedMembers().filter((member) => member.userId === userId && member.deletedAt == null);
     }

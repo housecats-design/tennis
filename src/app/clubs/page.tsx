@@ -28,10 +28,12 @@ export default function ClubsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       let shouldKeepLoading = false;
+      setLoadError(null);
       try {
         const nextProfile = await getCurrentProfile({ forceRefresh: true });
         setProfile(nextProfile);
@@ -41,9 +43,16 @@ export default function ClubsPage() {
         });
 
         let nextMemberships: ClubMember[] = [];
+        let nextClubs: Club[] = [];
         if (nextProfile?.id) {
-          try {
-            nextMemberships = await listMyClubMemberships(nextProfile.id);
+          const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
+            listMyClubMemberships(nextProfile.id, { strict: true }),
+            listActiveClubs({ strict: true }),
+            listMyClubApplications(nextProfile.id),
+          ]);
+
+          if (membershipResult.status === "fulfilled") {
+            nextMemberships = membershipResult.value;
             console.info("[clubs-routing] club_members", {
               userId: nextProfile.id,
               count: nextMemberships.length,
@@ -54,8 +63,31 @@ export default function ClubsPage() {
                 deletedAt: membership.deletedAt,
               })),
             });
-          } catch (membershipError) {
-            console.error("[clubs-routing] club_members fetch failed", membershipError);
+          } else {
+            console.error("[clubs-routing] club_members fetch failed", membershipResult.reason);
+            setLoadError("내 클럽 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+          }
+
+          if (clubsResult.status === "fulfilled") {
+            nextClubs = clubsResult.value;
+            setClubs(nextClubs);
+            console.info("[clubs-routing] clubs", {
+              count: nextClubs.length,
+              clubs: nextClubs.map((club) => ({
+                id: club.id,
+                clubName: club.clubName,
+                visibility: club.visibility ?? "public",
+              })),
+            });
+          } else {
+            console.error("[clubs-routing] clubs fetch failed", clubsResult.reason);
+            setLoadError((current) => current ?? "클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+          }
+
+          if (applicationResult.status === "fulfilled") {
+            setApplications(applicationResult.value);
+          } else {
+            console.error("[clubs-routing] club applications fetch failed", applicationResult.reason);
           }
 
           setMemberships(nextMemberships);
@@ -76,32 +108,24 @@ export default function ClubsPage() {
             router.replace(`/clubs/home?clubId=${defaultMembership.clubId}`);
             return;
           }
-
-          try {
-            const nextApplications = await listMyClubApplications(nextProfile.id);
-            setApplications(nextApplications);
-          } catch (applicationError) {
-            console.error("[clubs-routing] club applications fetch failed", applicationError);
-          }
         } else {
           setMemberships([]);
           setApplications([]);
-        }
-
-        try {
-          const nextClubs = await listActiveClubs();
-          setClubs(nextClubs);
-          console.info("[clubs-routing] clubs", {
-            count: nextClubs.length,
-            clubs: nextClubs.map((club) => ({
-              id: club.id,
-              clubName: club.clubName,
-              visibility: club.visibility ?? "public",
-            })),
-          });
-        } catch (clubError) {
-          console.error("[clubs-routing] clubs fetch failed", clubError);
-          setClubs([]);
+          try {
+            nextClubs = await listActiveClubs({ strict: true });
+            setClubs(nextClubs);
+            console.info("[clubs-routing] clubs", {
+              count: nextClubs.length,
+              clubs: nextClubs.map((club) => ({
+                id: club.id,
+                clubName: club.clubName,
+                visibility: club.visibility ?? "public",
+              })),
+            });
+          } catch (clubError) {
+            console.error("[clubs-routing] clubs fetch failed", clubError);
+            setLoadError("클럽 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+          }
         }
       } finally {
         if (!shouldKeepLoading) {
@@ -177,6 +201,7 @@ export default function ClubsPage() {
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink/68">
           클럽 소개를 보고, 가입 신청을 보내고, 클럽 생성 요청과 내 요청 이력을 확인할 수 있습니다.
         </p>
+        {loadError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div> : null}
       </section>
 
       <section className="grid gap-10 border-t border-line py-8 lg:grid-cols-[0.95fr_1.05fr]">
@@ -194,6 +219,8 @@ export default function ClubsPage() {
                       </div>
                     </Link>
                   ))
+                ) : loadError ? (
+                  <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">내 클럽 정보를 다시 불러와 주세요.</div>
                 ) : (
                   <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">아직 가입된 클럽이 없습니다.</div>
                 )
@@ -240,6 +267,8 @@ export default function ClubsPage() {
                     </div>
                   </div>
                 ))
+              ) : loadError ? (
+                <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">클럽 목록을 다시 불러와 주세요.</div>
               ) : (
                 <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">아직 등록된 클럽이 없습니다.</div>
               )}
