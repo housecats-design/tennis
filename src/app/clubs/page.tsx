@@ -29,6 +29,8 @@ export default function ClubsPage() {
   const isDev = process.env.NODE_ENV === "development";
 
   const [authReady, setAuthReady] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +72,8 @@ export default function ClubsPage() {
 
       if (!supabase) {
         setProfile(null);
+        setAuthUserId(null);
+        setAuthUserEmail(null);
         setDebugState((current) => ({
           ...current,
           authUser: null,
@@ -93,6 +97,8 @@ export default function ClubsPage() {
         authUserId: authUser?.id ?? null,
         authUserEmail: authUser?.email ?? null,
       }));
+      setAuthUserId(authUser?.id ?? null);
+      setAuthUserEmail(authUser?.email ?? null);
 
       if (!authUser?.id) {
         setProfile(null);
@@ -138,12 +144,12 @@ export default function ClubsPage() {
       let nextMemberships: ClubMember[] = [];
       let nextClubs: Club[] = [];
 
-      if (profile?.id && supabase) {
+      if (authUserId && supabase) {
         const [membershipResult, clubsResult, applicationResult] = await Promise.allSettled([
           supabase
             .from("club_members")
             .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
-            .eq("user_id", profile.id)
+            .eq("user_id", authUserId)
             .is("deleted_at", null)
             .eq("is_active", true)
             .order("joined_at", { ascending: false }),
@@ -154,8 +160,8 @@ export default function ClubsPage() {
             .eq("is_active", true)
             .in("status", ["active", "approved"])
             .order("created_at", { ascending: false }),
-          listMyClubApplications(profile.id),
-        ]);
+            listMyClubApplications(authUserId),
+          ]);
 
         if (membershipResult.status === "fulfilled") {
           setDebugState((current) => ({
@@ -182,11 +188,11 @@ export default function ClubsPage() {
               }),
             );
           }
-          console.info("[clubs-routing] club_members", {
-            userId: profile.id,
-            rawCount: membershipResult.value.data?.length ?? 0,
-            count: nextMemberships.length,
-            memberships: nextMemberships.map((membership) => ({
+            console.info("[clubs-routing] club_members", {
+              userId: authUserId,
+              rawCount: membershipResult.value.data?.length ?? 0,
+              count: nextMemberships.length,
+              memberships: nextMemberships.map((membership) => ({
               clubId: membership.clubId,
               role: membership.role,
               isActive: membership.isActive,
@@ -307,15 +313,15 @@ export default function ClubsPage() {
         return;
       }
 
-      setDebugState((current) => ({
-        ...current,
-        routingDecision: profile?.id ? "클럽 탐색 화면 유지" : "비로그인: 클럽 탐색 화면 유지",
-      }));
+        setDebugState((current) => ({
+          ...current,
+          routingDecision: authUserId ? "CLUB DISCOVERY MODE" : "비로그인: CLUB DISCOVERY MODE",
+        }));
       setLoading(false);
     };
 
     void loadClubPageData();
-  }, [authReady, profile?.id, router]);
+  }, [authReady, authUserId, router]);
 
   const myClubs = useMemo(() => {
     const joinedClubIds = new Set(
@@ -372,8 +378,8 @@ export default function ClubsPage() {
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
             <div className="font-bold">클럽 디버그</div>
             <div>auth ready: {String(authReady)}</div>
-            <div>auth user id: {debugState.authUserId ?? "-"}</div>
-            <div>auth user email: {debugState.authUserEmail ?? "-"}</div>
+            <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
+            <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
             <div>loading: {String(loading)}</div>
             <div>error: {loadError ?? "-"}</div>
             <div>routing: {debugState.routingDecision}</div>
@@ -405,6 +411,7 @@ export default function ClubsPage() {
       </div>
 
       <section className="border-t border-line py-8">
+        <div className="mb-3 text-xs font-black tracking-[0.2em] text-accentStrong">CLUB DISCOVERY MODE</div>
         <p className="poster-label">클럽 탐색</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">클럽 탐색</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink/68">
@@ -415,8 +422,8 @@ export default function ClubsPage() {
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
             <div className="font-bold">클럽 디버그</div>
             <div>auth ready: {String(authReady)}</div>
-            <div>auth user id: {debugState.authUserId ?? "-"}</div>
-            <div>auth user email: {debugState.authUserEmail ?? "-"}</div>
+            <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
+            <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
             <div>loading: {String(loading)}</div>
             <div>error: {loadError ?? "-"}</div>
             <div>routing: {debugState.routingDecision}</div>

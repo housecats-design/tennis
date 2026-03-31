@@ -111,6 +111,7 @@ export default function ClubHomePage() {
       </div>
 
       <section className="border-t border-line py-8">
+        <div className="mb-3 text-xs font-black tracking-[0.2em] text-accentStrong">CLUB HOME MODE</div>
         <p className="poster-label">내 클럽 홈</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">내 클럽 홈</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink/68">
