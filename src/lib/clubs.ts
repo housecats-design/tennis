@@ -309,15 +309,100 @@ export function sortClubMembershipsForDefault<T extends { membership: ClubMember
 }
 
 export async function listMyApprovedClubs(userId: string): Promise<Array<{ club: Club; membership: ClubMember }>> {
-  const memberships = await listMyClubMemberships(userId);
-  const approvedMemberships = memberships.filter(
-    (membership) => isActiveClubMembership(membership),
+  if (!userId) {
+    return [];
+  }
+
+  if (!isSupabaseEnabled()) {
+    const memberships = loadCachedMembers().filter(
+      (member) => member.userId === userId && member.isActive !== false && member.deletedAt == null && member.leftAt == null,
+    );
+    const clubMap = new Map(
+      loadCachedClubs()
+        .filter((club) => club.isActive !== false && club.deletedAt == null)
+        .map((club) => [club.id, club]),
+    );
+
+    return sortClubMembershipsForDefault(
+      memberships
+        .filter((membership) => isActiveClubMembership(membership))
+        .map((membership) => ({ club: clubMap.get(membership.clubId) ?? null, membership }))
+        .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
+    );
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: membershipRows, error: membershipError } = await supabase!
+    .from("club_members")
+    .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .order("joined_at", { ascending: false });
+
+  if (membershipError || !Array.isArray(membershipRows)) {
+    throw new Error(membershipError?.message || "클럽 멤버십을 불러오지 못했습니다.");
+  }
+
+  const memberships = membershipRows.map((row) =>
+    normalizeClubMember({
+      id: (row as ClubMemberRow).id,
+      clubId: (row as ClubMemberRow).club_id,
+      userId: (row as ClubMemberRow).user_id,
+      role: normalizeClubRole((row as ClubMemberRow).role),
+      membershipStatus: normalizeMembershipStatus((row as ClubMemberRow).membership_status),
+      joinedAt: (row as ClubMemberRow).joined_at ?? new Date().toISOString(),
+      approvedBy: (row as ClubMemberRow).approved_by ?? null,
+      approvedAt: (row as ClubMemberRow).approved_at ?? null,
+      leftAt: (row as ClubMemberRow).left_at ?? null,
+      isActive: (row as ClubMemberRow).is_active ?? true,
+      deletedAt: (row as ClubMemberRow).deleted_at ?? null,
+    }),
   );
-  const clubs = await Promise.all(approvedMemberships.map((membership) => getClubById(membership.clubId)));
+
+  cacheMembers(memberships);
+
+  const activeMemberships = memberships.filter((membership) => isActiveClubMembership(membership));
+  if (activeMemberships.length === 0) {
+    return [];
+  }
+
+  const clubIds = [...new Set(activeMemberships.map((membership) => membership.clubId))];
+  const { data: clubRows, error: clubsError } = await supabase!
+    .from("clubs")
+    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .in("id", clubIds)
+    .eq("is_active", true)
+    .is("deleted_at", null);
+
+  if (clubsError || !Array.isArray(clubRows)) {
+    throw new Error(clubsError?.message || "클럽 목록을 불러오지 못했습니다.");
+  }
+
+  const clubs = clubRows.map((row) =>
+    normalizeClub({
+      id: (row as ClubRow).id,
+      clubName: (row as ClubRow).club_name,
+      region: (row as ClubRow).region ?? null,
+      description: (row as ClubRow).description ?? null,
+      visibility: normalizeClubVisibility((row as ClubRow).visibility),
+      createdByUserId: (row as ClubRow).created_by_user_id,
+      status: normalizeClubStatus((row as ClubRow).status),
+      approvedBy: (row as ClubRow).approved_by ?? null,
+      approvedAt: (row as ClubRow).approved_at ?? null,
+      isActive: (row as ClubRow).is_active ?? true,
+      deletedAt: (row as ClubRow).deleted_at ?? null,
+      createdAt: (row as ClubRow).created_at ?? new Date().toISOString(),
+      updatedAt: (row as ClubRow).updated_at ?? new Date().toISOString(),
+    }),
+  );
+  cacheClubs(clubs);
+  const clubMap = new Map(clubs.map((club) => [club.id, club]));
+
   return sortClubMembershipsForDefault(
-    approvedMemberships
-    .map((membership, index) => ({ club: clubs[index], membership }))
-    .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
+    activeMemberships
+      .map((membership) => ({ club: clubMap.get(membership.clubId) ?? null, membership }))
+      .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
   );
 }
 
@@ -870,10 +955,10 @@ export async function listMyClubMemberships(userId: string, options?: { strict?:
     return [];
   }
 
-  await repairClubMembershipConsistency();
-
   if (!isSupabaseEnabled()) {
-    return loadCachedMembers().filter((member) => member.userId === userId && member.deletedAt == null);
+    return loadCachedMembers().filter(
+      (member) => member.userId === userId && member.isActive !== false && member.deletedAt == null,
+    );
   }
 
   const supabase = getSupabaseClient();
@@ -881,6 +966,7 @@ export async function listMyClubMemberships(userId: string, options?: { strict?:
     .from("club_members")
     .select("id, club_id, user_id, role, membership_status, joined_at, approved_by, approved_at, left_at, is_active, deleted_at")
     .eq("user_id", userId)
+    .eq("is_active", true)
     .is("deleted_at", null)
     .order("joined_at", { ascending: false });
 

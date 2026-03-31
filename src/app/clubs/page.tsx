@@ -26,7 +26,6 @@ type DebugState = {
 
 export default function ClubsPage() {
   const router = useRouter();
-  const isDev = process.env.NODE_ENV === "development";
 
   const [authReady, setAuthReady] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -380,30 +379,31 @@ export default function ClubsPage() {
           {redirecting ? "CLUB HOME MODE" : "CLUB DISCOVERY MODE"}
         </div>
         <div>클럽 화면을 불러오는 중...</div>
-        {isDev ? (
-          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
-            <div className="font-bold">클럽 디버그</div>
-            <div>auth ready: {String(authReady)}</div>
-            <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
-            <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
-            <div>loading: {String(loading)}</div>
-            <div>error: {loadError ?? "-"}</div>
-            <div>routing: {debugState.routingDecision}</div>
-            <div>myClubs length: {myClubs.length}</div>
-            <div>discoveryClubs length: {clubs.length}</div>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
-              {JSON.stringify(
-                {
-                  authUser: debugState.authUser,
-                  clubMembers: debugState.clubMembersRaw,
-                  clubs: debugState.clubsRaw,
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </div>
-        ) : null}
+        <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+          <div className="font-bold">클럽 디버그</div>
+          <div>route: /clubs</div>
+          <div>auth ready: {String(authReady)}</div>
+          <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
+          <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
+          <div>loading: {String(loading)}</div>
+          <div>error: {loadError ?? "-"}</div>
+          <div>routing: {debugState.routingDecision}</div>
+          <div>membership result count: {Array.isArray(debugState.clubMembersRaw) ? debugState.clubMembersRaw.length : 0}</div>
+          <div>clubs result count: {Array.isArray(debugState.clubsRaw) ? debugState.clubsRaw.length : 0}</div>
+          <div>myClubs length: {myClubs.length}</div>
+          <div>discoveryClubs length: {clubs.length}</div>
+          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+            {JSON.stringify(
+              {
+                authUser: debugState.authUser,
+                clubMembers: debugState.clubMembersRaw,
+                clubs: debugState.clubsRaw,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </div>
       </main>
     );
   }
@@ -429,30 +429,31 @@ export default function ClubsPage() {
           클럽 소개를 보고, 가입 신청을 보내고, 클럽 생성 요청과 내 요청 이력을 확인할 수 있습니다.
         </p>
         {loadError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div> : null}
-        {isDev ? (
-          <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
-            <div className="font-bold">클럽 디버그</div>
-            <div>auth ready: {String(authReady)}</div>
-            <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
-            <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
-            <div>loading: {String(loading)}</div>
-            <div>error: {loadError ?? "-"}</div>
-            <div>routing: {debugState.routingDecision}</div>
-            <div>myClubs length: {myClubs.length}</div>
-            <div>discoveryClubs length: {clubs.length}</div>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
-              {JSON.stringify(
-                {
-                  authUser: debugState.authUser,
-                  clubMembers: debugState.clubMembersRaw,
-                  clubs: debugState.clubsRaw,
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </div>
-        ) : null}
+        <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
+          <div className="font-bold">클럽 디버그</div>
+          <div>route: /clubs</div>
+          <div>auth ready: {String(authReady)}</div>
+          <div>auth user id: {authUserId ?? debugState.authUserId ?? "-"}</div>
+          <div>auth user email: {authUserEmail ?? debugState.authUserEmail ?? "-"}</div>
+          <div>loading: {String(loading)}</div>
+          <div>error: {loadError ?? "-"}</div>
+          <div>routing: {debugState.routingDecision}</div>
+          <div>membership result count: {Array.isArray(debugState.clubMembersRaw) ? debugState.clubMembersRaw.length : 0}</div>
+          <div>clubs result count: {Array.isArray(debugState.clubsRaw) ? debugState.clubsRaw.length : 0}</div>
+          <div>myClubs length: {myClubs.length}</div>
+          <div>discoveryClubs length: {clubs.length}</div>
+          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+            {JSON.stringify(
+              {
+                authUser: debugState.authUser,
+                clubMembers: debugState.clubMembersRaw,
+                clubs: debugState.clubsRaw,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </div>
       </section>
 
       <section className="grid gap-10 border-t border-line py-8 lg:grid-cols-[0.95fr_1.05fr]">
