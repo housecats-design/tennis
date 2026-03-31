@@ -373,6 +373,12 @@ export default function ClubsPage() {
   if (!authReady || loading || redirecting) {
     return (
       <main className="poster-page max-w-5xl text-sm text-ink/70">
+        <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
+          DEBUG CLUB PAGE ACTIVE
+        </div>
+        <div className="mb-4 border-4 border-blue-700 bg-blue-100 px-4 py-3 text-base font-black tracking-[0.08em] text-blue-800">
+          {redirecting ? "CLUB HOME MODE" : "CLUB DISCOVERY MODE"}
+        </div>
         <div>클럽 화면을 불러오는 중...</div>
         {isDev ? (
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
@@ -404,6 +410,12 @@ export default function ClubsPage() {
 
   return (
     <main className="poster-page max-w-6xl">
+      <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
+        DEBUG CLUB PAGE ACTIVE
+      </div>
+      <div className="mb-6 border-4 border-blue-700 bg-blue-100 px-4 py-3 text-base font-black tracking-[0.08em] text-blue-800">
+        CLUB DISCOVERY MODE
+      </div>
       <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         {profile ? <Link href="/profile" className="poster-button-secondary">프로필 설정</Link> : null}
@@ -411,7 +423,6 @@ export default function ClubsPage() {
       </div>
 
       <section className="border-t border-line py-8">
-        <div className="mb-3 text-xs font-black tracking-[0.2em] text-accentStrong">CLUB DISCOVERY MODE</div>
         <p className="poster-label">클럽 탐색</p>
         <h1 className="mt-3 text-5xl font-black tracking-[-0.04em]">클럽 탐색</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink/68">
