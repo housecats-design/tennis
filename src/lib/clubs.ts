@@ -672,6 +672,8 @@ export async function listActiveClubs(): Promise<Club[]> {
     );
   }
 
+  await repairApprovedClubApplications();
+
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("clubs")
@@ -959,6 +961,144 @@ export async function listAllClubApplications(): Promise<ClubApplication[]> {
   return applications;
 }
 
+function buildClubIdFromApplication(application: ClubApplication): string {
+  const suffix = application.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12) || crypto.randomUUID().slice(0, 8);
+  return `club_${suffix}`;
+}
+
+async function ensureLeaderMembershipForClub(input: {
+  clubId: string;
+  applicantUserId: string;
+  reviewerUserId: string | null;
+  reviewedAt: string | null;
+}): Promise<void> {
+  const leaderMembership = normalizeClubMember({
+    id: makeId("club_member"),
+    clubId: input.clubId,
+    userId: input.applicantUserId,
+    role: "leader",
+    membershipStatus: "approved",
+    approvedBy: input.reviewerUserId,
+    approvedAt: input.reviewedAt ?? new Date().toISOString(),
+    isActive: true,
+  });
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase!.from("club_members").upsert(
+      {
+        id: leaderMembership.id,
+        club_id: leaderMembership.clubId,
+        user_id: leaderMembership.userId,
+        role: leaderMembership.role,
+        membership_status: leaderMembership.membershipStatus,
+        joined_at: leaderMembership.joinedAt,
+        approved_by: leaderMembership.approvedBy ?? null,
+        approved_at: leaderMembership.approvedAt ?? null,
+        left_at: null,
+        is_active: true,
+        deleted_at: null,
+        created_at: new Date().toISOString(),
+      },
+      { onConflict: "club_id,user_id" },
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  const currentMembers = loadCachedMembers().filter(
+    (member) => !(member.clubId === input.clubId && member.userId === input.applicantUserId),
+  );
+  cacheMembers([leaderMembership, ...currentMembers]);
+}
+
+async function ensureClubForApprovedApplication(application: ClubApplication): Promise<Club | null> {
+  if (application.status !== "approved") {
+    return null;
+  }
+
+  const existingClub = await findClubByName(application.clubName);
+  if (existingClub) {
+    await ensureLeaderMembershipForClub({
+      clubId: existingClub.id,
+      applicantUserId: application.applicantUserId,
+      reviewerUserId: application.reviewedBy ?? null,
+      reviewedAt: application.reviewedAt ?? null,
+    });
+    return existingClub;
+  }
+
+  const createdClub = normalizeClub({
+    id: buildClubIdFromApplication(application),
+    clubName: application.clubName,
+    region: application.region,
+    description: application.description ?? "",
+    visibility: "public",
+    createdByUserId: application.applicantUserId,
+    status: "approved",
+    approvedBy: application.reviewedBy ?? null,
+    approvedAt: application.reviewedAt ?? null,
+    isActive: true,
+  });
+
+  if (isSupabaseEnabled()) {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase!.from("clubs").upsert(
+      {
+        id: createdClub.id,
+        club_name: createdClub.clubName,
+        region: createdClub.region ?? null,
+        description: createdClub.description ?? "",
+        visibility: createdClub.visibility ?? "public",
+        created_by_user_id: createdClub.createdByUserId,
+        status: createdClub.status ?? "approved",
+        approved_by: createdClub.approvedBy ?? null,
+        approved_at: createdClub.approvedAt ?? null,
+        is_active: true,
+        deleted_at: null,
+        created_at: createdClub.createdAt,
+        updated_at: createdClub.updatedAt,
+      },
+      { onConflict: "id" },
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  const currentClubs = loadCachedClubs().filter((club) => club.id !== createdClub.id);
+  cacheClubs([createdClub, ...currentClubs]);
+  await ensureLeaderMembershipForClub({
+    clubId: createdClub.id,
+    applicantUserId: application.applicantUserId,
+    reviewerUserId: application.reviewedBy ?? null,
+    reviewedAt: application.reviewedAt ?? null,
+  });
+
+  return createdClub;
+}
+
+export async function repairApprovedClubApplications(): Promise<number> {
+  const applications = await listAllClubApplications();
+  const approvedApplications = applications.filter((application) => application.status === "approved");
+  let repairedCount = 0;
+
+  for (const application of approvedApplications) {
+    const existingClub = await findClubByName(application.clubName);
+    if (existingClub) {
+      continue;
+    }
+
+    await ensureClubForApprovedApplication(application);
+    repairedCount += 1;
+  }
+
+  return repairedCount;
+}
+
 export async function reviewClubApplication(input: {
   applicationId: string;
   reviewerUserId: string;
@@ -981,19 +1121,8 @@ export async function reviewClubApplication(input: {
   });
 
   let createdClub: Club | null = null;
-
   if (input.status === "approved") {
-    createdClub = normalizeClub({
-      id: `club_${crypto.randomUUID().slice(0, 8)}`,
-      clubName: target.clubName,
-      region: target.region,
-      description: target.description ?? null,
-      createdByUserId: target.applicantUserId,
-      status: "approved",
-      approvedBy: input.reviewerUserId,
-      approvedAt: reviewedAt,
-      isActive: true,
-    });
+    createdClub = await ensureClubForApprovedApplication(nextApplication);
   }
 
   if (isSupabaseEnabled()) {
@@ -1014,55 +1143,6 @@ export async function reviewClubApplication(input: {
       }
     }
 
-    if (createdClub) {
-      const { error: insertClubError } = await supabase!.from("clubs").insert({
-        id: createdClub.id,
-        club_name: createdClub.clubName,
-        region: createdClub.region ?? null,
-        description: createdClub.description ?? null,
-        created_by_user_id: createdClub.createdByUserId,
-        status: createdClub.status ?? "approved",
-        approved_by: createdClub.approvedBy ?? null,
-        approved_at: createdClub.approvedAt ?? null,
-        is_active: true,
-        deleted_at: null,
-        created_at: createdClub.createdAt,
-        updated_at: createdClub.updatedAt,
-      });
-
-      if (insertClubError) {
-        if (!shouldFallbackToLocal(insertClubError)) {
-          throw new Error(insertClubError.message);
-        }
-      } else {
-        const leaderMembership = normalizeClubMember({
-          id: makeId("club_member"),
-          clubId: createdClub.id,
-          userId: target.applicantUserId,
-          role: "leader",
-          membershipStatus: "approved",
-          approvedBy: input.reviewerUserId,
-          approvedAt: reviewedAt,
-        });
-        await supabase!.from("club_members").upsert(
-          {
-            id: leaderMembership.id,
-            club_id: leaderMembership.clubId,
-            user_id: leaderMembership.userId,
-            role: leaderMembership.role,
-            membership_status: leaderMembership.membershipStatus,
-            joined_at: leaderMembership.joinedAt,
-            approved_by: leaderMembership.approvedBy ?? null,
-            approved_at: leaderMembership.approvedAt ?? null,
-            left_at: null,
-            is_active: true,
-            deleted_at: null,
-            created_at: new Date().toISOString(),
-          },
-          { onConflict: "club_id,user_id" },
-        );
-      }
-    }
   }
 
   const cachedApplications = loadCachedApplications().map((application) =>
@@ -1070,7 +1150,7 @@ export async function reviewClubApplication(input: {
   );
   cacheApplications(cachedApplications);
 
-  if (createdClub) {
+  if (createdClub && !isSupabaseEnabled()) {
     const currentClubs = loadCachedClubs().filter((club) => club.id !== createdClub.id);
     cacheClubs([createdClub, ...currentClubs]);
     const leaderMembership = normalizeClubMember({
