@@ -63,6 +63,9 @@ export type Match = {
   completed?: boolean;
   skipped?: boolean;
   scoreProposal?: ScoreProposal | null;
+  lastScoreUpdatedByName?: string | null;
+  lastScoreUpdatedByUserId?: string | null;
+  lastScoreUpdatedAt?: string | null;
 };
 
 export type Round = {

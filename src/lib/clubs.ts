@@ -1074,26 +1074,45 @@ async function ensureClubMembershipRecord(input: {
 
   if (isSupabaseEnabled()) {
     const supabase = getSupabaseClient();
-    const { error } = await supabase!.from("club_members").upsert(
-      {
+    const { data: existingMembership, error: existingMembershipError } = await supabase!
+      .from("club_members")
+      .select("id")
+      .eq("club_id", membership.clubId)
+      .eq("user_id", membership.userId)
+      .maybeSingle();
+
+    if (existingMembershipError) {
+      throw new Error(existingMembershipError.message);
+    }
+
+    if (existingMembership?.id) {
+      const { error: updateError } = await supabase!
+        .from("club_members")
+        .update({
+          role: membership.role,
+          joined_at: membership.joinedAt,
+          is_active: true,
+          deleted_at: null,
+        })
+        .eq("id", existingMembership.id);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+    } else {
+      const { error: insertError } = await supabase!.from("club_members").insert({
         id: membership.id,
         club_id: membership.clubId,
         user_id: membership.userId,
         role: membership.role,
-        membership_status: membership.membershipStatus,
         joined_at: membership.joinedAt,
-        approved_by: membership.approvedBy ?? null,
-        approved_at: membership.approvedAt ?? null,
-        left_at: null,
         is_active: true,
         deleted_at: null,
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: "club_id,user_id" },
-    );
+      });
 
-    if (error) {
-      throw new Error(error.message);
+      if (insertError) {
+        throw new Error(insertError.message);
+      }
     }
   }
 

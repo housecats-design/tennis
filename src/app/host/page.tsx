@@ -41,6 +41,7 @@ export default function HostPage() {
     roundViewMode: RoundViewMode;
     hostUserId: string;
   } | null>(null);
+  const [prefillApplied, setPrefillApplied] = useState(false);
 
   useEffect(() => {
     const sync = async () => {
@@ -65,6 +66,25 @@ export default function HostPage() {
 
     void sync();
   }, [router]);
+
+  useEffect(() => {
+    if (checkingAuth || prefillApplied) {
+      return;
+    }
+
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const requestedEventType = params?.get("eventType");
+    const requestedClubId = params?.get("clubId");
+
+    if (requestedEventType === "club") {
+      setEventType("club");
+      if (requestedClubId && availableClubs.some((club) => club.id === requestedClubId)) {
+        setClubId(requestedClubId);
+      }
+    }
+
+    setPrefillApplied(true);
+  }, [availableClubs, checkingAuth, prefillApplied]);
 
   async function createNextEvent(input: NonNullable<typeof pendingCreatePayload>): Promise<void> {
     const { event: nextEvent, hostParticipant } = await createEvent({

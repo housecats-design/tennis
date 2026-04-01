@@ -187,7 +187,12 @@ export default function ClubHomePage() {
         <div className="mt-4 flex flex-wrap gap-3 text-sm">
           <Link href={`/clubs/${selectedClubId || clubData?.club?.id || ""}`} className="poster-button-secondary">클럽 상세</Link>
           {canCreateClubEvent(selectedMembership?.role ?? "member") ? (
-            <Link href="/host" className="poster-button">클럽 이벤트 생성</Link>
+            <Link
+              href={selectedClubId ? `/host?eventType=club&clubId=${encodeURIComponent(selectedClubId)}` : "/host"}
+              className="poster-button"
+            >
+              클럽 이벤트 생성
+            </Link>
           ) : null}
           {canApproveClubJoinRequests(selectedMembership?.role ?? "member") ? (
             <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">

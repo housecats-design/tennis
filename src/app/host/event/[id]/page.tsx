@@ -54,6 +54,23 @@ function getRoundAccentClass(roundNumber: number): string {
   return accents[(roundNumber - 1) % accents.length];
 }
 
+function formatLastUpdated(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -72,6 +89,7 @@ export default function HostEventPage() {
   const [roundActionPending, setRoundActionPending] = useState<string | null>(null);
   const [recommendedMembers, setRecommendedMembers] = useState<Array<{ userId: string; displayName: string; email?: string | null }>>([]);
   const [matchEditDrafts, setMatchEditDrafts] = useState<Record<string, string[]>>({});
+  const [savingDirectMatchKey, setSavingDirectMatchKey] = useState<string | null>(null);
   const [eventClubName, setEventClubName] = useState<string | null>(null);
   const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
 
@@ -440,7 +458,9 @@ export default function HostEventPage() {
 
     const key = `${roundNumber}:${matchId}`;
     const participantIds = matchEditDrafts[key] ?? [];
+    setSavingDirectMatchKey(key);
     if (!window.confirm("선수 직접 편집 내용을 반영하시겠습니까? 현재 경기의 점수와 확인 상태는 초기화됩니다.")) {
+      setSavingDirectMatchKey(null);
       return;
     }
     const reason = window.prompt("선수 직접 편집 사유를 입력하세요. (선택)");
@@ -456,6 +476,8 @@ export default function HostEventPage() {
       setError(null);
     } catch (directEditError) {
       setError(directEditError instanceof Error ? directEditError.message : "경기 직접 편집에 실패했습니다.");
+    } finally {
+      setSavingDirectMatchKey(null);
     }
   }
 
@@ -473,6 +495,9 @@ export default function HostEventPage() {
     const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, {
       scoreA: key === "scoreA" ? parseScoreValue(value) : match.scoreA ?? null,
       scoreB: key === "scoreB" ? parseScoreValue(value) : match.scoreB ?? null,
+    }, {
+      name: profile?.displayName ?? "호스트",
+      userId: profile?.id ?? null,
     });
     setEvent(nextEvent);
   }
@@ -592,7 +617,10 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, { scoreA, scoreB });
+    const nextEvent = await updateMatchScores(event.id, roundNumber, matchId, { scoreA, scoreB }, {
+      name: profile?.displayName ?? "호스트",
+      userId: profile?.id ?? null,
+    });
     setEvent(nextEvent);
   }
 
@@ -1057,6 +1085,10 @@ export default function HostEventPage() {
                       const pool = getRoundPlayerPool(round.roundNumber);
                       const draft = matchEditDrafts[draftKey] ?? [];
                       const slotCount = event.matchType === "singles" ? 2 : 4;
+                      const isDirty = draft.length > 0 && draft.some((playerId, index) => playerId !== playerIds[index]);
+                      const hasEmptySlot = draft.length !== slotCount || draft.some((playerId) => !playerId);
+                      const hasDuplicatePlayer = new Set(draft.filter(Boolean)).size !== draft.filter(Boolean).length;
+                      const canSaveDirectEdit = isDirty && !hasEmptySlot && !hasDuplicatePlayer && savingDirectMatchKey !== draftKey;
                       return (
                         <>
                     <p className="poster-label">Court {match.court}</p>
@@ -1102,9 +1134,10 @@ export default function HostEventPage() {
                               <button
                                 type="button"
                                 onClick={() => void handleSaveDirectMatchEdit(round.roundNumber, match.id ?? "")}
-                                className="poster-button-secondary"
+                                disabled={!canSaveDirectEdit}
+                                className="poster-button-secondary disabled:opacity-50"
                               >
-                                직접 편집 저장
+                                {savingDirectMatchKey === draftKey ? "저장 중..." : "직접 편집 저장"}
                               </button>
                               <button
                                 type="button"
@@ -1114,6 +1147,9 @@ export default function HostEventPage() {
                                 취소
                               </button>
                             </div>
+                            {!isDirty ? <div className="text-xs text-ink/55">선수 구성이 바뀌면 저장할 수 있습니다.</div> : null}
+                            {hasEmptySlot ? <div className="text-xs text-red-700">모든 선수 자리를 선택해야 합니다.</div> : null}
+                            {hasDuplicatePlayer ? <div className="text-xs text-red-700">같은 선수를 중복 선택할 수 없습니다.</div> : null}
                           </div>
                         ) : (
                           <button
@@ -1158,6 +1194,11 @@ export default function HostEventPage() {
                         </select>
                       </label>
                     </div>
+                    {match.lastScoreUpdatedAt ? (
+                      <div className="mt-3 text-xs text-ink/60">
+                        마지막 수정: {match.lastScoreUpdatedByName ?? "알 수 없음"} · {formatLastUpdated(match.lastScoreUpdatedAt)}
+                      </div>
+                    ) : null}
                     {match.scoreProposal?.status === "disputed" ? (
                       <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
                         "border-red-200 bg-red-50 text-red-700"

@@ -26,6 +26,7 @@ import {
 } from "@/lib/types";
 import { accumulateRoundStats, createStatsRecord } from "@/lib/stats";
 import { createEventNotification, createInvitationNotification, getGuestNotifications, markNotificationRead, notifyRoundCompletion } from "@/lib/notifications";
+import { isCompletedMatchScore } from "@/lib/score";
 import { generateScheduleSchema } from "@/lib/validator";
 import { calculateExpectedParticipation, calculateLeaderboard } from "@/lib/leaderboard";
 
@@ -166,6 +167,9 @@ function normalizeRounds(rounds: EventRecord["rounds"] | null | undefined): Even
       isTieBreak: Boolean(match?.isTieBreak),
       completed: Boolean(match?.completed),
       skipped: Boolean(match?.skipped),
+      lastScoreUpdatedByName: typeof match?.lastScoreUpdatedByName === "string" ? match.lastScoreUpdatedByName : null,
+      lastScoreUpdatedByUserId: typeof match?.lastScoreUpdatedByUserId === "string" ? match.lastScoreUpdatedByUserId : null,
+      lastScoreUpdatedAt: typeof match?.lastScoreUpdatedAt === "string" ? match.lastScoreUpdatedAt : null,
       scoreProposal: match?.scoreProposal
         ? {
             scoreA: match.scoreProposal.scoreA,
@@ -1345,19 +1349,12 @@ export async function generateEventSchedule(eventId: string): Promise<EventRecor
   );
 }
 
-function isValidScore(scoreA: number | null | undefined, scoreB: number | null | undefined): boolean {
-  return (
-    (scoreA === 6 && typeof scoreB === "number" && scoreB >= 0 && scoreB <= 5) ||
-    (scoreB === 6 && typeof scoreA === "number" && scoreA >= 0 && scoreA <= 5)
-  );
-}
-
 function canFinalizeMatch(match: Round["matches"][number]): boolean {
   if (match.skipped) {
     return true;
   }
 
-  return isValidScore(match.scoreA, match.scoreB);
+  return isCompletedMatchScore(match.scoreA, match.scoreB);
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -1427,6 +1424,7 @@ export async function updateMatchScores(
   roundNumber: number,
   matchId: string,
   scores: { scoreA: number | null; scoreB: number | null },
+  actor?: { name?: string | null; userId?: string | null },
 ): Promise<EventRecord | null> {
   return updateEvent(eventId, (event) =>
     withDerivedEventState({
@@ -1444,6 +1442,9 @@ export async function updateMatchScores(
                       scoreA: scores.scoreA,
                       scoreB: scores.scoreB,
                       scoreProposal: null,
+                      lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
+                      lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
+                      lastScoreUpdatedAt: new Date().toISOString(),
                       isTieBreak:
                         (scores.scoreA === 6 && scores.scoreB === 5) ||
                         (scores.scoreA === 5 && scores.scoreB === 6),
@@ -1458,6 +1459,9 @@ export async function updateMatchScores(
                       scoreA: scores.scoreA,
                       scoreB: scores.scoreB,
                       scoreProposal: null,
+                      lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
+                      lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
+                      lastScoreUpdatedAt: new Date().toISOString(),
                       isTieBreak:
                         (scores.scoreA === 6 && scores.scoreB === 5) ||
                         (scores.scoreA === 5 && scores.scoreB === 6),
@@ -1477,6 +1481,7 @@ export async function submitMatchScoreProposal(
   matchId: string,
   participantId: string,
   scores: { scoreA: number; scoreB: number },
+  actor?: { name?: string | null; userId?: string | null },
 ): Promise<EventRecord | null> {
   return updateEvent(eventId, (event) => {
     const nextRounds = event.rounds.map((round) =>
@@ -1490,6 +1495,9 @@ export async function submitMatchScoreProposal(
                     ...match,
                     scoreA: scores.scoreA,
                     scoreB: scores.scoreB,
+                    lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
+                    lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
+                    lastScoreUpdatedAt: new Date().toISOString(),
                     isTieBreak:
                       (scores.scoreA === 6 && scores.scoreB === 5) ||
                       (scores.scoreA === 5 && scores.scoreB === 6),
