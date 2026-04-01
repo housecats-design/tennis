@@ -7,6 +7,8 @@ import { Club, ClubMember } from "@/lib/types";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+const DEBUG_BUILD_LABEL = "branch:main commit:f5b73e6 env:club-debug";
+
 function formatActivity(value: string | null): string {
   if (!value) {
     return "기록 없음";
@@ -29,6 +31,8 @@ export default function ClubHomePage() {
   const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
   const [rawMembershipRows, setRawMembershipRows] = useState<unknown>(null);
   const [rawClubRows, setRawClubRows] = useState<unknown>(null);
+  const [approvedClubsResultCount, setApprovedClubsResultCount] = useState(0);
+  const [matchedClubsCount, setMatchedClubsCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [routingDecision, setRoutingDecision] = useState("CLUB HOME MODE");
   const noClubReason = loadError
@@ -117,6 +121,8 @@ export default function ClubHomePage() {
         console.info("[clubs-home] clubs", normalizedClubs);
         console.info("[clubs-home] listMyApprovedClubs", nextClubs);
 
+        setMatchedClubsCount(normalizedClubs.length);
+        setApprovedClubsResultCount(nextClubs.length);
         setMyClubs(nextClubs);
         setRoutingDecision(nextClubs.length > 0 ? "CLUB HOME MODE" : "CLUB DISCOVERY MODE");
         const requestedClubId =
@@ -158,6 +164,9 @@ export default function ClubHomePage() {
   if (loading) {
     return (
       <main className="poster-page max-w-6xl text-sm text-ink/70">
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
+          BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs/home
+        </div>
         <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
           DEBUG CLUB PAGE ACTIVE
         </div>
@@ -172,6 +181,9 @@ export default function ClubHomePage() {
   if (!authUserId) {
     return (
       <main className="poster-page max-w-5xl">
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
+          BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs/home
+        </div>
         <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
           DEBUG REAL CLUB HOME
         </div>
@@ -199,6 +211,9 @@ export default function ClubHomePage() {
   if (myClubs.length === 0) {
     return (
       <main className="poster-page max-w-5xl">
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
+          BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs/home
+        </div>
         <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
           DEBUG REAL CLUB HOME
         </div>
@@ -236,6 +251,9 @@ export default function ClubHomePage() {
 
   return (
     <main className="poster-page max-w-7xl">
+      <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
+        BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs/home
+      </div>
       <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
         DEBUG REAL CLUB HOME
       </div>
@@ -245,6 +263,7 @@ export default function ClubHomePage() {
       <div className="mb-6 rounded-2xl border border-red-300 bg-red-50 p-4 text-xs leading-5 text-red-900">
         <div className="font-bold">클럽 디버그</div>
         <div>route: /clubs/home</div>
+        <div>auth user id exists: {String(Boolean(authUserId))}</div>
         <div>auth user id: {authUserId ?? "-"}</div>
         <div>auth user email: {authUserEmail ?? "-"}</div>
         <div>loading: {String(loading)}</div>
@@ -252,6 +271,8 @@ export default function ClubHomePage() {
         <div>final routing decision: {routingDecision}</div>
         <div>membership result count: {Array.isArray(rawMembershipRows) ? rawMembershipRows.length : 0}</div>
         <div>clubs result count: {Array.isArray(rawClubRows) ? rawClubRows.length : 0}</div>
+        <div>listMyApprovedClubs result count: {approvedClubsResultCount}</div>
+        <div>clubs matched count: {matchedClubsCount}</div>
         <div>myClubs length: {myClubs.length}</div>
         <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all">
           {JSON.stringify(
@@ -264,7 +285,16 @@ export default function ClubHomePage() {
           )}
         </pre>
       </div>
-      <div className="mb-6 flex flex-wrap gap-3">
+      <div className="fixed bottom-3 right-3 z-50 max-w-[92vw] rounded-lg border border-black/20 bg-black/85 px-3 py-2 text-[10px] leading-4 text-white shadow-lg">
+        <div>BUILD TAG {DEBUG_BUILD_LABEL}</div>
+        <div>route /clubs/home</div>
+        <div>auth {authUserId ? "yes" : "no"}</div>
+        <div>memberships {Array.isArray(rawMembershipRows) ? rawMembershipRows.length : 0}</div>
+        <div>clubs {Array.isArray(rawClubRows) ? rawClubRows.length : 0}</div>
+        <div>approvedClubs {approvedClubsResultCount}</div>
+        <div>myClubs {myClubs.length}</div>
+      </div>
+    <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         <Link href="/clubs/home" className="poster-button-secondary">내 클럽 홈</Link>
         <Link href="/clubs/discovery" className="poster-button-secondary">클럽 탐색</Link>

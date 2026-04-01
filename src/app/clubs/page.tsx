@@ -24,6 +24,8 @@ type DebugState = {
   routingDecision: string;
 };
 
+const DEBUG_BUILD_LABEL = "branch:main commit:f5b73e6 env:club-debug";
+
 export default function ClubsPage() {
   const router = useRouter();
 
@@ -401,6 +403,9 @@ export default function ClubsPage() {
 
   return (
     <main className="poster-page max-w-6xl">
+      <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
+        BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs
+      </div>
       <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
         DEBUG CLUB PAGE ACTIVE
       </div>
@@ -446,6 +451,15 @@ export default function ClubsPage() {
           </pre>
         </div>
       </section>
+      <div className="fixed bottom-3 right-3 z-50 max-w-[92vw] rounded-lg border border-black/20 bg-black/85 px-3 py-2 text-[10px] leading-4 text-white shadow-lg">
+        <div>BUILD TAG {DEBUG_BUILD_LABEL}</div>
+        <div>route /clubs</div>
+        <div>auth {authUserId ? "yes" : "no"}</div>
+        <div>memberships {Array.isArray(debugState.clubMembersRaw) ? debugState.clubMembersRaw.length : 0}</div>
+        <div>clubs {Array.isArray(debugState.clubsRaw) ? debugState.clubsRaw.length : 0}</div>
+        <div>myClubs {myClubs.length}</div>
+        <div>{debugState.routingDecision}</div>
+      </div>
 
       <section className="grid gap-10 border-t border-line py-8 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="space-y-8">
