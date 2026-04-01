@@ -122,16 +122,6 @@ export default function ProfilePage() {
           {submitting ? "저장 중..." : "설정 저장"}
         </button>
       </form>
-
-      <section className="border-t border-line py-8">
-        <h2 className="text-2xl font-black">클럽</h2>
-        <p className="mt-3 text-sm text-ink/68">
-          클럽 가입, 생성 요청, 내 클럽 확인은 클럽 페이지에서 관리할 수 있습니다.
-        </p>
-        <div className="mt-4">
-          <Link href="/clubs" className="poster-button-secondary">클럽 페이지로 이동</Link>
-        </div>
-      </section>
     </main>
   );
 }

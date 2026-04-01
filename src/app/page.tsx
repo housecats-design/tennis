@@ -29,6 +29,27 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 type FieldStatus = "idle" | "checking" | "available" | "taken";
+const HOME_AUTH_TIMEOUT_MS = 4000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T, label: string): Promise<T> {
+  let timer: number | undefined;
+
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = window.setTimeout(() => {
+          console.warn(`[home] ${label} timed out after ${timeoutMs}ms`);
+          resolve(fallbackValue);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      window.clearTimeout(timer);
+    }
+  }
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -82,44 +103,71 @@ export default function HomePage() {
 
   useEffect(() => {
     const sync = async () => {
-      const nextProfile = await getCurrentProfile();
-      setProfile(nextProfile);
-      if (nextProfile?.id) {
-        setInvitations(await loadUserInvitations(nextProfile.id));
-        const activeSession = await loadReturnableParticipationSession(nextProfile.id);
-        if (activeSession) {
-          saveLastEvent(activeSession.event.id);
-          saveLastParticipant(activeSession.participant.id);
-          setResumeRoute(
-            activeSession.participant.role === "host"
-              ? `/host/event/${activeSession.event.id}`
-              : `/guest/event/${activeSession.event.id}`,
+      try {
+        const nextProfile = await withTimeout(
+          getCurrentProfile({ forceRefresh: true }),
+          HOME_AUTH_TIMEOUT_MS,
+          null,
+          "getCurrentProfile",
+        );
+        setProfile(nextProfile);
+        if (nextProfile?.id) {
+          setInvitations(
+            await withTimeout(
+              loadUserInvitations(nextProfile.id),
+              HOME_AUTH_TIMEOUT_MS,
+              [],
+              "loadUserInvitations",
+            ),
           );
-        } else {
-          const lastEventId = loadLastEvent();
-          const lastParticipantId = loadLastParticipant();
-          const lastEvent = lastEventId ? await loadEvent(lastEventId) : null;
-          const returnableParticipant = getReturnableParticipant(lastEvent, {
-            userId: nextProfile.id,
-            participantId: lastParticipantId,
-          });
-          const canResume = Boolean(returnableParticipant && lastEvent);
-          if (!canResume) {
-            clearLastParticipation();
+          const activeSession = await withTimeout(
+            loadReturnableParticipationSession(nextProfile.id),
+            HOME_AUTH_TIMEOUT_MS,
+            null,
+            "loadReturnableParticipationSession",
+          );
+          if (activeSession) {
+            saveLastEvent(activeSession.event.id);
+            saveLastParticipant(activeSession.participant.id);
+            setResumeRoute(
+              activeSession.participant.role === "host"
+                ? `/host/event/${activeSession.event.id}`
+                : `/guest/event/${activeSession.event.id}`,
+            );
+          } else {
+            const lastEventId = loadLastEvent();
+            const lastParticipantId = loadLastParticipant();
+            const lastEvent = lastEventId
+              ? await withTimeout(loadEvent(lastEventId), HOME_AUTH_TIMEOUT_MS, null, "loadEvent")
+              : null;
+            const returnableParticipant = getReturnableParticipant(lastEvent, {
+              userId: nextProfile.id,
+              participantId: lastParticipantId,
+            });
+            const canResume = Boolean(returnableParticipant && lastEvent);
+            if (!canResume) {
+              clearLastParticipation();
+            }
+            setResumeRoute(
+              canResume && lastEvent
+                ? returnableParticipant?.role === "host"
+                  ? `/host/event/${lastEvent.id}`
+                  : `/guest/event/${lastEvent.id}`
+                : null,
+            );
           }
-          setResumeRoute(
-            canResume && lastEvent
-              ? returnableParticipant?.role === "host"
-                ? `/host/event/${lastEvent.id}`
-                : `/guest/event/${lastEvent.id}`
-              : null,
-          );
+        } else {
+          setInvitations([]);
+          setResumeRoute(null);
         }
-      } else {
+      } catch (syncError) {
+        console.error("[home] auth sync failed", syncError);
         setInvitations([]);
         setResumeRoute(null);
+        setError("세션 확인 중 문제가 발생했습니다. 다시 시도해 주세요.");
+      } finally {
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     };
 
     void sync();

@@ -1415,6 +1415,30 @@ export async function submitClubApplication(input: {
     throw new Error("지역을 입력해 주세요.");
   }
 
+  const existingApplications = await listMyClubApplications(normalized.applicantUserId);
+  const hasOpenApplication = existingApplications.some(
+    (application) => application.status === "pending" || application.status === "approved",
+  );
+  if (hasOpenApplication) {
+    throw new Error("클럽은 한개의 아이디로 한개의 클럽만 만들수있습니다.");
+  }
+
+  const existingMemberships = await listMyClubMemberships(normalized.applicantUserId);
+  const alreadyOwnsClub = existingMemberships.some(
+    (membership) => membership.role === "owner" && membership.isActive !== false && membership.deletedAt == null,
+  );
+  if (alreadyOwnsClub) {
+    throw new Error("클럽은 한개의 아이디로 한개의 클럽만 만들수있습니다.");
+  }
+
+  const existingClubs = await listActiveClubs();
+  const alreadyCreatedClub = existingClubs.some(
+    (club) => club.createdByUserId === normalized.applicantUserId && club.isActive && !club.deletedAt,
+  );
+  if (alreadyCreatedClub) {
+    throw new Error("클럽은 한개의 아이디로 한개의 클럽만 만들수있습니다.");
+  }
+
   if (isSupabaseEnabled()) {
     const supabase = getSupabaseClient();
     const { error } = await supabase!.from("club_applications").insert({

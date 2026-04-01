@@ -410,7 +410,12 @@ export async function updateProfileSettings(
     return null;
   }
 
-  if (input.gender && input.gender !== "unspecified" && current.gender !== "unspecified" && current.genderLockedAt) {
+  const wantsToChangeGender =
+    Boolean(input.gender) &&
+    input.gender !== "unspecified" &&
+    input.gender !== current.gender;
+
+  if (wantsToChangeGender && current.gender !== "unspecified" && current.genderLockedAt) {
     throw new Error("성별은 한 번만 설정할 수 있습니다. 변경이 필요하면 관리자에게 문의해 주세요.");
   }
 

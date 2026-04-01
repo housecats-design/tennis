@@ -273,6 +273,43 @@ function isMissingSessionSchemaError(error: { code?: string; message?: string } 
   return error?.code === "PGRST205" || message.includes("schema cache") || message.includes("does not exist");
 }
 
+function describeSessionPersistenceError(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") {
+    return { message: String(error ?? "unknown error") };
+  }
+
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    details?: string;
+    hint?: string;
+    name?: string;
+  };
+
+  const next: Record<string, unknown> = {};
+  if (candidate.name) {
+    next.name = candidate.name;
+  }
+  if (candidate.code) {
+    next.code = candidate.code;
+  }
+  if (candidate.message) {
+    next.message = candidate.message;
+  }
+  if (candidate.details) {
+    next.details = candidate.details;
+  }
+  if (candidate.hint) {
+    next.hint = candidate.hint;
+  }
+
+  if (Object.keys(next).length === 0) {
+    next.message = "unknown client error";
+  }
+
+  return next;
+}
+
 function findNextMatchAssignment(
   event: EventRecord,
   participantId: string,
@@ -417,7 +454,7 @@ async function persistParticipantPresence(event: EventRecord, participant: Parti
     );
 
   if (participantError && !isMissingSessionSchemaError(participantError)) {
-    console.error("[events] persist participant presence failed", participantError);
+    console.warn("[events] persist participant presence skipped", describeSessionPersistenceError(participantError));
   }
 
   if (!session) {
@@ -442,7 +479,7 @@ async function persistParticipantPresence(event: EventRecord, participant: Parti
     );
 
   if (sessionError && !isMissingSessionSchemaError(sessionError)) {
-    console.error("[events] persist participant session failed", sessionError);
+    console.warn("[events] persist participant session skipped", describeSessionPersistenceError(sessionError));
   }
 }
 

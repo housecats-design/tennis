@@ -120,7 +120,6 @@ export default function GuestEventPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scoreDraft, setScoreDraft] = useState({ scoreA: "", scoreB: "" });
-  const [pendingCustomScore, setPendingCustomScore] = useState<{ scoreA: number; scoreB: number } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [eventClubName, setEventClubName] = useState<string | null>(null);
   const [participantClubName, setParticipantClubName] = useState<string | null>(null);
@@ -291,7 +290,6 @@ export default function GuestEventPage() {
     });
     await touchParticipantSession(eventId, { participantId });
     setScoreDraft({ scoreA: "", scoreB: "" });
-    setPendingCustomScore(null);
     setToastMessage("점수가 등록되었습니다.");
     window.setTimeout(() => setToastMessage(null), 1800);
   }
@@ -314,8 +312,10 @@ export default function GuestEventPage() {
     }
 
     if (!isStandardScore(scoreA, scoreB)) {
-      setPendingCustomScore({ scoreA, scoreB });
-      return;
+      const shouldApply = window.confirm("이 점수로 반영하시겠습니까?");
+      if (!shouldApply) {
+        return;
+      }
     }
 
     await submitProposalScores(scoreA, scoreB);
@@ -518,23 +518,6 @@ export default function GuestEventPage() {
             >
               점수 등록
             </button>
-
-            {pendingCustomScore ? (
-              <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">
-                <div className="font-semibold">이대로 반영할까요?</div>
-                <div className="mt-2">
-                  {teamALabel} {pendingCustomScore.scoreA} : {teamBLabel} {pendingCustomScore.scoreB}
-                </div>
-                <div className="mt-3 flex gap-3">
-                  <button type="button" onClick={() => void submitProposalScores(pendingCustomScore.scoreA, pendingCustomScore.scoreB)} className="poster-button-secondary">
-                    반영한다
-                  </button>
-                  <button type="button" onClick={() => setPendingCustomScore(null)} className="border border-line px-4 py-3 font-semibold">
-                    다시 선택
-                  </button>
-                </div>
-              </div>
-            ) : null}
 
             {currentMatch.scoreProposal ? (
               <div className="border-l-2 border-amber-300 pl-4 text-sm text-amber-900">

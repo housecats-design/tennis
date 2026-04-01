@@ -160,7 +160,6 @@ export default function ClubHomePage() {
     () => myClubs.find((item) => item.club.id === selectedClubId)?.membership ?? null,
     [myClubs, selectedClubId],
   );
-
   if (loading) {
     return (
       <main className="poster-page max-w-6xl text-sm text-ink/70">
@@ -273,8 +272,7 @@ export default function ClubHomePage() {
       <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         <Link href="/clubs/home" className="poster-button-secondary">내 클럽 홈</Link>
-        <Link href="/clubs" className="poster-button-secondary">클럽 탐색</Link>
-        <Link href="/profile" className="poster-button-secondary">프로필 설정</Link>
+        <Link href="/clubs/discovery" className="poster-button-secondary">클럽 탐색</Link>
       </div>
 
       <section className="border-t border-line py-8">
@@ -284,6 +282,29 @@ export default function ClubHomePage() {
           가입된 클럽의 최근 활동, 멤버 현황, 클럽 전적과 운영 메뉴를 한 곳에서 확인합니다.
         </p>
         {loadError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div> : null}
+      </section>
+
+      <section className="border-t border-line py-6">
+        <h2 className="text-2xl font-black">운영 메뉴</h2>
+        <div className="mt-4 flex flex-wrap gap-3 text-sm">
+          <Link href={`/clubs/${selectedClubId || clubData?.club?.id || ""}`} className="poster-button-secondary">클럽 상세</Link>
+          {canCreateClubEvent(selectedMembership?.role ?? "member") ? (
+            <Link href="/host" className="poster-button">클럽 이벤트 생성</Link>
+          ) : null}
+          {canApproveClubJoinRequests(selectedMembership?.role ?? "member") ? (
+            <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">
+              클럽장은 가입 요청 승인/거절, 부클럽장 지정/해제, 클럽 설정 관리를 할 수 있습니다.
+            </div>
+          ) : canCreateClubEvent(selectedMembership?.role ?? "member") ? (
+            <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">
+              부클럽장은 클럽 이벤트 생성과 운영이 가능합니다.
+            </div>
+          ) : (
+            <div className="border-l-2 border-line pl-4 text-ink/68">
+              일반 회원은 클럽 기록 확인과 클럽 이벤트 참여가 가능합니다.
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="border-t border-line py-6">
@@ -387,29 +408,6 @@ export default function ClubHomePage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </section>
-
-          <section className="border-t border-line py-8">
-            <h2 className="text-3xl font-black">운영 메뉴</h2>
-            <div className="mt-4 flex flex-wrap gap-3 text-sm">
-              <Link href={`/clubs/${clubData.club.id}`} className="poster-button-secondary">클럽 상세</Link>
-              {canCreateClubEvent(selectedMembership?.role ?? "member") ? (
-                <Link href="/host" className="poster-button">클럽 이벤트 생성</Link>
-              ) : null}
-              {canApproveClubJoinRequests(selectedMembership?.role ?? "member") ? (
-                <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">
-                  클럽장은 가입 요청 승인/거절, 부클럽장 지정/해제, 클럽 소개 수정과 설정 관리를 할 수 있습니다.
-                </div>
-              ) : canCreateClubEvent(selectedMembership?.role ?? "member") ? (
-                <div className="border-l-2 border-accentStrong pl-4 text-accentStrong">
-                  부클럽장은 클럽 이벤트 생성과 운영이 가능합니다. 가입 요청 승인은 할 수 없습니다.
-                </div>
-              ) : (
-                <div className="border-l-2 border-line pl-4 text-ink/68">
-                  일반 회원은 클럽 홈과 기록을 확인하고 클럽 이벤트에 참여할 수 있습니다.
-                </div>
-              )}
             </div>
           </section>
         </>
