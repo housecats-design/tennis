@@ -366,7 +366,7 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
   const clubIds = [...new Set(activeMemberships.map((membership) => membership.clubId))];
   const { data: clubRows, error: clubsError } = await supabase!
     .from("clubs")
-    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
     .in("id", clubIds)
     .eq("is_active", true)
     .is("deleted_at", null);
@@ -379,13 +379,9 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
     normalizeClub({
       id: (row as ClubRow).id,
       clubName: (row as ClubRow).club_name,
-      region: (row as ClubRow).region ?? null,
       description: (row as ClubRow).description ?? null,
       visibility: normalizeClubVisibility((row as ClubRow).visibility),
       createdByUserId: (row as ClubRow).created_by_user_id,
-      status: normalizeClubStatus((row as ClubRow).status),
-      approvedBy: (row as ClubRow).approved_by ?? null,
-      approvedAt: (row as ClubRow).approved_at ?? null,
       isActive: (row as ClubRow).is_active ?? true,
       deletedAt: (row as ClubRow).deleted_at ?? null,
       createdAt: (row as ClubRow).created_at ?? new Date().toISOString(),
@@ -775,10 +771,9 @@ export async function listActiveClubs(options?: { strict?: boolean }): Promise<C
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("clubs")
-    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
     .is("deleted_at", null)
     .eq("is_active", true)
-    .in("status", ["active", "approved"])
     .order("created_at", { ascending: false });
 
   if (error || !Array.isArray(data)) {
@@ -799,13 +794,9 @@ export async function listActiveClubs(options?: { strict?: boolean }): Promise<C
     normalizeClub({
       id: (row as ClubRow).id,
       clubName: (row as ClubRow).club_name,
-      region: (row as ClubRow).region ?? null,
       description: (row as ClubRow).description ?? null,
       visibility: normalizeClubVisibility((row as ClubRow).visibility),
       createdByUserId: (row as ClubRow).created_by_user_id,
-      status: normalizeClubStatus((row as ClubRow).status),
-      approvedBy: (row as ClubRow).approved_by ?? null,
-      approvedAt: (row as ClubRow).approved_at ?? null,
       isActive: (row as ClubRow).is_active ?? true,
       deletedAt: (row as ClubRow).deleted_at ?? null,
       createdAt: (row as ClubRow).created_at ?? new Date().toISOString(),
@@ -828,7 +819,7 @@ export async function getClubById(clubId: string): Promise<Club | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("clubs")
-    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
     .eq("id", clubId)
     .maybeSingle();
 
@@ -842,13 +833,9 @@ export async function getClubById(clubId: string): Promise<Club | null> {
   const club = normalizeClub({
     id: (data as ClubRow).id,
     clubName: (data as ClubRow).club_name,
-    region: (data as ClubRow).region ?? null,
     description: (data as ClubRow).description ?? null,
     visibility: normalizeClubVisibility((data as ClubRow).visibility),
     createdByUserId: (data as ClubRow).created_by_user_id,
-    status: normalizeClubStatus((data as ClubRow).status),
-    approvedBy: (data as ClubRow).approved_by ?? null,
-    approvedAt: (data as ClubRow).approved_at ?? null,
     isActive: (data as ClubRow).is_active ?? true,
     deletedAt: (data as ClubRow).deleted_at ?? null,
     createdAt: (data as ClubRow).created_at ?? new Date().toISOString(),
@@ -869,7 +856,7 @@ async function findClubByName(clubName: string): Promise<Club | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase!
     .from("clubs")
-    .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+    .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
     .eq("club_name", normalizedClubName)
     .maybeSingle();
 
@@ -883,13 +870,9 @@ async function findClubByName(clubName: string): Promise<Club | null> {
   const club = normalizeClub({
     id: (data as ClubRow).id,
     clubName: (data as ClubRow).club_name,
-    region: (data as ClubRow).region ?? null,
     description: (data as ClubRow).description ?? null,
     visibility: normalizeClubVisibility((data as ClubRow).visibility),
     createdByUserId: (data as ClubRow).created_by_user_id,
-    status: normalizeClubStatus((data as ClubRow).status),
-    approvedBy: (data as ClubRow).approved_by ?? null,
-    approvedAt: (data as ClubRow).approved_at ?? null,
     isActive: (data as ClubRow).is_active ?? true,
     deletedAt: (data as ClubRow).deleted_at ?? null,
     createdAt: (data as ClubRow).created_at ?? new Date().toISOString(),

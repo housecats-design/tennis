@@ -154,10 +154,9 @@ export default function ClubsPage() {
             .order("joined_at", { ascending: false }),
           supabase
             .from("clubs")
-            .select("id, club_name, region, description, visibility, created_by_user_id, status, approved_by, approved_at, is_active, deleted_at, created_at, updated_at")
+            .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
             .is("deleted_at", null)
             .eq("is_active", true)
-            .in("status", ["active", "approved"])
             .order("created_at", { ascending: false }),
             listMyClubApplications(authUserId),
           ]);
@@ -216,13 +215,9 @@ export default function ClubsPage() {
               normalizeClub({
                 id: clubRow.id,
                 clubName: clubRow.club_name,
-                region: clubRow.region ?? null,
                 description: clubRow.description ?? null,
                 visibility: clubRow.visibility ?? "public",
                 createdByUserId: clubRow.created_by_user_id,
-                status: clubRow.status ?? "active",
-                approvedBy: clubRow.approved_by ?? null,
-                approvedAt: clubRow.approved_at ?? null,
                 isActive: clubRow.is_active ?? true,
                 deletedAt: clubRow.deleted_at ?? null,
                 createdAt: clubRow.created_at ?? new Date().toISOString(),
