@@ -1,10 +1,9 @@
 "use client";
 
-import { getCurrentProfile } from "@/lib/auth";
 import { normalizeClub, normalizeClubMember } from "@/lib/clubs";
 import { getSupabaseClient } from "@/lib/supabase";
 import { buildClubHomeData, canApproveClubJoinRequests, canCreateClubEvent, listMyApprovedClubs } from "@/lib/clubs";
-import { Club, ClubMember, UserProfile } from "@/lib/types";
+import { Club, ClubMember } from "@/lib/types";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -22,7 +21,6 @@ function formatActivity(value: string | null): string {
 }
 
 export default function ClubHomePage() {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [myClubs, setMyClubs] = useState<Array<{ club: Club; membership: ClubMember }>>([]);
   const [selectedClubId, setSelectedClubId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,9 +53,6 @@ export default function ClubHomePage() {
         const nextAuthUserId = authUser?.id ?? null;
         setAuthUserId(nextAuthUserId);
         setAuthUserEmail(authUser?.email ?? null);
-
-        const nextProfile = await getCurrentProfile({ forceRefresh: true });
-        setProfile(nextProfile);
 
         if (!nextAuthUserId || !supabase) {
           setRoutingDecision("CLUB DISCOVERY MODE");
@@ -174,7 +169,7 @@ export default function ClubHomePage() {
     );
   }
 
-  if (!profile) {
+  if (!authUserId) {
     return (
       <main className="poster-page max-w-5xl">
         <div className="mb-6 border-4 border-red-600 bg-yellow-200 px-4 py-3 text-base font-black tracking-[0.08em] text-red-700">
@@ -190,7 +185,7 @@ export default function ClubHomePage() {
             <div>route: /clubs/home</div>
             <div>auth user id: {authUserId ?? "-"}</div>
             <div>membership count: {Array.isArray(rawMembershipRows) ? rawMembershipRows.length : 0}</div>
-            <div>reason: profile이 없어 클럽 홈을 렌더할 수 없습니다.</div>
+            <div>reason: 로그인 세션이 없어 클럽 홈을 렌더할 수 없습니다.</div>
           </div>
           <div className="mt-5 flex gap-3">
             <Link href="/" className="poster-button">메인 페이지</Link>
