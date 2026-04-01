@@ -6,8 +6,6 @@ import { Club, ClubApplication, UserProfile } from "@/lib/types";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
-const DEBUG_BUILD_LABEL = "branch:main commit:f5b73e6 env:club-debug";
-
 export default function ClubDiscoveryPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -72,9 +70,6 @@ export default function ClubDiscoveryPage() {
 
   return (
     <main className="poster-page max-w-6xl">
-      <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900">
-        BUILD TAG · {DEBUG_BUILD_LABEL} · route:/clubs/discovery
-      </div>
       <div className="mb-6 flex flex-wrap gap-3">
         <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         <Link href="/clubs/home" className="poster-button-secondary">내 클럽 홈</Link>
@@ -179,13 +174,6 @@ export default function ClubDiscoveryPage() {
           </div>
         </div>
       </section>
-      <div className="fixed bottom-3 right-3 z-50 max-w-[92vw] rounded-lg border border-black/20 bg-black/85 px-3 py-2 text-[10px] leading-4 text-white shadow-lg">
-        <div>BUILD TAG {DEBUG_BUILD_LABEL}</div>
-        <div>route /clubs/discovery</div>
-        <div>profile {profile?.id ?? "-"}</div>
-        <div>clubs {clubs.length}</div>
-        <div>applications {applications.length}</div>
-      </div>
     </main>
   );
 }

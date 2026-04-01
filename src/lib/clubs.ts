@@ -313,10 +313,6 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
     return [];
   }
 
-  console.info("[clubs-helper] listMyApprovedClubs:start", {
-    authUserId: userId,
-  });
-
   if (!isSupabaseEnabled()) {
     const memberships = loadCachedMembers().filter(
       (member) => member.userId === userId && member.isActive !== false && member.deletedAt == null && member.leftAt == null,
@@ -327,24 +323,12 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
         .map((club) => [club.id, club]),
     );
 
-    const mapped = sortClubMembershipsForDefault(
+    return sortClubMembershipsForDefault(
       memberships
         .filter((membership) => isActiveClubMembership(membership))
         .map((membership) => ({ club: clubMap.get(membership.clubId) ?? null, membership }))
         .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
     );
-    console.info("[clubs-helper] listMyApprovedClubs:local", {
-      authUserId: userId,
-      membershipRowsCount: memberships.length,
-      clubIds: memberships.map((membership) => membership.clubId),
-      matchedClubsCount: mapped.length,
-      finalMappedResult: mapped.map((item) => ({
-        clubId: item.club.id,
-        clubName: item.club.clubName,
-        role: item.membership.role,
-      })),
-    });
-    return mapped;
   }
 
   const supabase = getSupabaseClient();
@@ -359,12 +343,6 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
   if (membershipError || !Array.isArray(membershipRows)) {
     throw new Error(membershipError?.message || "클럽 멤버십을 불러오지 못했습니다.");
   }
-
-  console.info("[clubs-helper] listMyApprovedClubs:membershipRows", {
-    authUserId: userId,
-    membershipRowsCount: membershipRows.length,
-    membershipRows,
-  });
 
   const memberships = membershipRows.map((row) =>
     normalizeClubMember({
@@ -382,18 +360,10 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
 
   const activeMemberships = memberships.filter((membership) => isActiveClubMembership(membership));
   if (activeMemberships.length === 0) {
-    console.info("[clubs-helper] listMyApprovedClubs:noActiveMemberships", {
-      authUserId: userId,
-      membershipRowsCount: memberships.length,
-    });
     return [];
   }
 
   const clubIds = [...new Set(activeMemberships.map((membership) => membership.clubId))];
-  console.info("[clubs-helper] listMyApprovedClubs:clubIds", {
-    authUserId: userId,
-    clubIds,
-  });
   const { data: clubRows, error: clubsError } = await supabase!
     .from("clubs")
     .select("id, club_name, description, visibility, created_by_user_id, is_active, deleted_at, created_at, updated_at")
@@ -404,12 +374,6 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
   if (clubsError || !Array.isArray(clubRows)) {
     throw new Error(clubsError?.message || "클럽 목록을 불러오지 못했습니다.");
   }
-
-  console.info("[clubs-helper] listMyApprovedClubs:clubRows", {
-    authUserId: userId,
-    matchedClubsCount: clubRows.length,
-    clubRows,
-  });
 
   const clubs = clubRows.map((row) =>
     normalizeClub({
@@ -427,21 +391,11 @@ export async function listMyApprovedClubs(userId: string): Promise<Array<{ club:
   cacheClubs(clubs);
   const clubMap = new Map(clubs.map((club) => [club.id, club]));
 
-  const mapped = sortClubMembershipsForDefault(
+  return sortClubMembershipsForDefault(
     activeMemberships
       .map((membership) => ({ club: clubMap.get(membership.clubId) ?? null, membership }))
       .filter((item): item is { club: Club; membership: ClubMember } => Boolean(item.club)),
   );
-  console.info("[clubs-helper] listMyApprovedClubs:finalMappedResult", {
-    authUserId: userId,
-    finalMappedCount: mapped.length,
-    finalMappedResult: mapped.map((item) => ({
-      clubId: item.club.id,
-      clubName: item.club.clubName,
-      role: item.membership.role,
-    })),
-  });
-  return mapped;
 }
 
 export async function listClubApplicationsForUser(userId: string): Promise<ClubApplication[]> {
