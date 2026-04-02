@@ -8,7 +8,7 @@ import { shouldConfirmScoreBeforeSave, validateScoreInput } from "@/lib/score";
 import { getSessionId, loadLastParticipant } from "@/lib/storage";
 import { Notification, RankedPlayer } from "@/lib/types";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
@@ -126,6 +126,7 @@ function formatLastUpdated(value: string | null | undefined): string {
 
 export default function GuestEventPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const eventId = typeof params.id === "string" ? params.id : "";
   const [currentEvent, setCurrentEvent] = useState<Awaited<ReturnType<typeof loadEvent>>>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
@@ -310,6 +311,21 @@ export default function GuestEventPage() {
     void buildFinalRanking(currentEvent).then(setFinalRanking);
   }, [currentEvent]);
 
+  useEffect(() => {
+    if (currentEvent?.status !== "cancelled") {
+      return;
+    }
+
+    setToastMessage("호스트가 이벤트를 종료했습니다. 메인 페이지로 이동합니다.");
+    const timer = window.setTimeout(() => {
+      router.replace("/");
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [currentEvent?.status, router]);
+
   async function submitProposalScores(scoreA: number, scoreB: number): Promise<void> {
     if (!eventId || !currentMatchRound || !currentMatch || !participantId) {
       return;
@@ -338,7 +354,7 @@ export default function GuestEventPage() {
       }
       setScoreDraft({ scoreA: "", scoreB: "" });
       setPendingScoreConfirmation(null);
-      setToastMessage("점수가 등록되었습니다.");
+      setToastMessage("점수가 반영되었습니다. 다음 경기 정보를 확인해 주세요.");
       window.setTimeout(() => setToastMessage(null), 1800);
     } finally {
       setSubmittingScore(false);
@@ -578,7 +594,7 @@ export default function GuestEventPage() {
             </div>
             {pendingScoreConfirmation ? (
               <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <div className="font-semibold">비정상 점수입니다. 어떻게 진행하시겠습니까?</div>
+                <div className="font-semibold">반영하시겠습니까?</div>
                 <div className="mt-1">
                   {teamALabel} {pendingScoreConfirmation.scoreA} : {teamBLabel} {pendingScoreConfirmation.scoreB}
                 </div>
@@ -589,7 +605,7 @@ export default function GuestEventPage() {
                     disabled={submittingScore}
                     className="poster-button disabled:opacity-60"
                   >
-                    저장
+                    네
                   </button>
                   <button
                     type="button"
@@ -597,7 +613,7 @@ export default function GuestEventPage() {
                     disabled={submittingScore}
                     className="poster-button-secondary disabled:opacity-60"
                   >
-                    다시 수정
+                    아니요
                   </button>
                 </div>
               </div>

@@ -79,6 +79,16 @@ function getRoundParticipantStatusLabel(round: NonNullable<Awaited<ReturnType<ty
   return isPlaying ? "게임중" : "대기";
 }
 
+function roundNeedsScoreConfirmation(round: NonNullable<Awaited<ReturnType<typeof loadEvent>>>["rounds"][number]): boolean {
+  return round.matches.some((match) => {
+    if (match.skipped || !Number.isInteger(match.scoreA) || !Number.isInteger(match.scoreB)) {
+      return false;
+    }
+
+    return Math.max(match.scoreA ?? 0, match.scoreB ?? 0) !== 6;
+  });
+}
+
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -100,6 +110,8 @@ export default function HostEventPage() {
   const [savingDirectMatchKey, setSavingDirectMatchKey] = useState<string | null>(null);
   const [eventClubName, setEventClubName] = useState<string | null>(null);
   const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
+  const [pendingRoundFinalize, setPendingRoundFinalize] = useState<number | null>(null);
+  const [showForceEndDialog, setShowForceEndDialog] = useState(false);
 
   useEffect(() => {
     if (!eventId) {
@@ -246,6 +258,20 @@ export default function HostEventPage() {
 
     void buildFinalRanking(event).then(setFinalRanking);
   }, [event]);
+
+  useEffect(() => {
+    if (event?.status !== "cancelled") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      router.replace("/");
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [event?.status, router]);
 
   async function handleParticipantChange(
     participantId: string,
@@ -539,6 +565,7 @@ export default function HostEventPage() {
     try {
       const nextEvent = await finalizeRound(event.id, roundNumber);
       setError(null);
+      setPendingRoundFinalize(null);
       setEvent(nextEvent);
     } catch (finalizeError) {
       setError(finalizeError instanceof Error ? finalizeError.message : "라운드 완료에 실패했습니다.");
@@ -680,14 +707,13 @@ export default function HostEventPage() {
       return;
     }
 
-    const confirmed = window.confirm("이벤트를 강제 종료할까요?\n지금 종료하면 이 이벤트는 저장되지 않습니다.");
-    if (!confirmed) {
-      return;
-    }
-
     const nextEvent = await forceEndEvent(event.id);
     setEvent(nextEvent);
-    setSaveInfo("이벤트를 강제 종료했습니다. 이 이벤트는 공식 기록으로 저장되지 않습니다.");
+    setShowForceEndDialog(false);
+    setSaveInfo("이벤트를 강제 종료했습니다. 메인 페이지로 이동합니다.");
+    window.setTimeout(() => {
+      router.replace("/");
+    }, 1200);
   }
 
   if (loading) {
@@ -741,7 +767,7 @@ export default function HostEventPage() {
             새로고침
           </button>
           {event.status === "in_progress" ? (
-            <button type="button" onClick={() => void handleForceEndEvent()} className="poster-button-secondary">
+            <button type="button" onClick={() => setShowForceEndDialog(true)} className="poster-button-secondary">
               강제 종료
             </button>
           ) : null}
@@ -1296,9 +1322,28 @@ export default function HostEventPage() {
 
               {!round.completed ? (
                 <div className="mt-5 flex flex-wrap gap-3">
+                  {pendingRoundFinalize === round.roundNumber ? (
+                    <div className="w-full border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      <div className="font-semibold">반영하시겠습니까?</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => void handleFinalizeRound(round.roundNumber)} className="poster-button">
+                          네
+                        </button>
+                        <button type="button" onClick={() => setPendingRoundFinalize(null)} className="poster-button-secondary">
+                          아니요
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={() => handleFinalizeRound(round.roundNumber)}
+                    onClick={() => {
+                      if (roundNeedsScoreConfirmation(round)) {
+                        setPendingRoundFinalize(round.roundNumber);
+                        return;
+                      }
+                      void handleFinalizeRound(round.roundNumber);
+                    }}
                     className="poster-button"
                   >
                     점수 올리기
@@ -1338,6 +1383,23 @@ export default function HostEventPage() {
           )}
         </div>
       </section>
+
+      {showForceEndDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-md border border-line bg-white p-6 shadow-xl">
+            <div className="text-2xl font-black">정말 종료하시겠습니까?</div>
+            <div className="mt-3 text-sm text-ink/70">지금 종료하면 이 이벤트는 저장되지 않습니다.</div>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleForceEndEvent()} className="poster-button">
+                네
+              </button>
+              <button type="button" onClick={() => setShowForceEndDialog(false)} className="poster-button-secondary">
+                아니요
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

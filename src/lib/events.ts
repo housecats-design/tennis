@@ -1355,7 +1355,118 @@ function canFinalizeMatch(match: Round["matches"][number]): boolean {
     return true;
   }
 
-  return isCompletedMatchScore(match.scoreA, match.scoreB);
+  return Number.isInteger(match.scoreA) && Number.isInteger(match.scoreB);
+}
+
+function hasRecordedScores(scoreA: number | null | undefined, scoreB: number | null | undefined): boolean {
+  return Number.isInteger(scoreA) && Number.isInteger(scoreB);
+}
+
+function applyMatchScoreUpdate(
+  event: EventRecord,
+  input: {
+    roundNumber: number;
+    matchId: string;
+    scores: { scoreA: number | null; scoreB: number | null };
+    actor?: { name?: string | null; userId?: string | null };
+    participantId?: string | null;
+    source: "host" | "player";
+  },
+): EventRecord {
+  const recordedAt = new Date().toISOString();
+  const targetRound = event.rounds.find((round) => round.roundNumber === input.roundNumber);
+  const roundWasCompleted = Boolean(targetRound?.completed);
+
+  const nextRounds = event.rounds.map((round) => {
+    if (round.roundNumber !== input.roundNumber) {
+      return round;
+    }
+
+    const nextMatches = round.matches.map((match) => {
+      if (match.id !== input.matchId) {
+        return match;
+      }
+
+      const completed = hasRecordedScores(input.scores.scoreA, input.scores.scoreB);
+      return {
+        ...match,
+        scoreA: input.scores.scoreA,
+        scoreB: input.scores.scoreB,
+        completed,
+        skipped: false,
+        scoreProposal:
+          input.source === "player" && completed
+            ? {
+                scoreA: input.scores.scoreA ?? 0,
+                scoreB: input.scores.scoreB ?? 0,
+                submittedByParticipantId: input.participantId ?? "",
+                submittedAt: recordedAt,
+                acceptedByParticipantIds: input.participantId ? [input.participantId] : [],
+                disputedByParticipantIds: [],
+                comments: [],
+                status: "accepted" as const,
+              }
+            : null,
+        lastScoreUpdatedByName: input.actor?.name ?? match.lastScoreUpdatedByName ?? null,
+        lastScoreUpdatedByUserId: input.actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
+        lastScoreUpdatedAt: recordedAt,
+        isTieBreak:
+          (input.scores.scoreA === 6 && input.scores.scoreB === 5) ||
+          (input.scores.scoreA === 5 && input.scores.scoreB === 6),
+      };
+    });
+
+    const completed = nextMatches.every((match) => match.skipped || hasRecordedScores(match.scoreA, match.scoreB));
+
+    return {
+      ...round,
+      completed,
+      closeReason: completed ? "completed" : round.closeReason ?? null,
+      forceClosed: completed ? false : round.forceClosed,
+      state: completed
+        ? ("completed" as const)
+        : currentRoundState({
+            ...round,
+            completed: false,
+            matches: nextMatches,
+          }),
+      matches: nextMatches,
+    };
+  }) as Round[];
+
+  const completedRounds = nextRounds.filter((round) => round.completed);
+  let stats = createStatsRecord(buildPlayers(event.participants));
+  for (const round of completedRounds) {
+    stats = accumulateRoundStats(stats, round, event.matchType);
+  }
+
+  const targetRoundNow = nextRounds.find((round) => round.roundNumber === input.roundNumber);
+  const roundJustCompleted = Boolean(targetRoundNow?.completed) && !roundWasCompleted;
+  const notifications = roundJustCompleted
+    ? notifyRoundCompletion({
+        event,
+        rounds: nextRounds,
+        completedRoundNumber: input.roundNumber,
+      })
+    : event.notifications;
+  const allCompleted = nextRounds.length > 0 && nextRounds.every((round) => round.completed);
+
+  return withDerivedEventState({
+    ...event,
+    rounds: nextRounds,
+    stats,
+    notifications: [
+      ...notifications,
+      createEventNotification({
+        eventId: event.id,
+        roundNumber: input.roundNumber,
+        message: "점수가 등록되었습니다.",
+        type: "success",
+      }),
+    ],
+    status: (allCompleted ? "completed_unsaved" : "in_progress") as EventRecord["status"],
+    finishedAt: allCompleted ? recordedAt : event.finishedAt ?? null,
+  });
 }
 
 export async function finalizeRound(eventId: string, roundNumber: number): Promise<EventRecord | null> {
@@ -1428,50 +1539,12 @@ export async function updateMatchScores(
   actor?: { name?: string | null; userId?: string | null },
 ): Promise<EventRecord | null> {
   return updateEvent(eventId, (event) =>
-    withDerivedEventState({
-      ...event,
-      rounds: event.rounds.map((round) =>
-        round.roundNumber === roundNumber
-        ? {
-            ...round,
-            state: currentRoundState({
-              ...round,
-              matches: round.matches.map((match) =>
-                match.id === matchId
-                  ? {
-                      ...match,
-                      scoreA: scores.scoreA,
-                      scoreB: scores.scoreB,
-                      scoreProposal: null,
-                      lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
-                      lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
-                      lastScoreUpdatedAt: new Date().toISOString(),
-                      isTieBreak:
-                        (scores.scoreA === 6 && scores.scoreB === 5) ||
-                        (scores.scoreA === 5 && scores.scoreB === 6),
-                    }
-                  : match,
-              ),
-            }),
-            matches: round.matches.map((match) =>
-                match.id === matchId
-                  ? {
-                      ...match,
-                      scoreA: scores.scoreA,
-                      scoreB: scores.scoreB,
-                      scoreProposal: null,
-                      lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
-                      lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
-                      lastScoreUpdatedAt: new Date().toISOString(),
-                      isTieBreak:
-                        (scores.scoreA === 6 && scores.scoreB === 5) ||
-                        (scores.scoreA === 5 && scores.scoreB === 6),
-                    }
-                  : match,
-              ),
-            }
-          : round,
-      ),
+    applyMatchScoreUpdate(event, {
+      roundNumber,
+      matchId,
+      scores,
+      actor,
+      source: "host",
     }),
   );
 }
@@ -1484,55 +1557,16 @@ export async function submitMatchScoreProposal(
   scores: { scoreA: number; scoreB: number },
   actor?: { name?: string | null; userId?: string | null },
 ): Promise<EventRecord | null> {
-  return updateEvent(eventId, (event) => {
-    const nextRounds = event.rounds.map((round) =>
-        round.roundNumber === roundNumber
-        ? {
-            ...round,
-            state: "score_pending" as const,
-            matches: round.matches.map((match) =>
-              match.id === matchId
-                ? {
-                    ...match,
-                    scoreA: scores.scoreA,
-                    scoreB: scores.scoreB,
-                    lastScoreUpdatedByName: actor?.name ?? match.lastScoreUpdatedByName ?? null,
-                    lastScoreUpdatedByUserId: actor?.userId ?? match.lastScoreUpdatedByUserId ?? null,
-                    lastScoreUpdatedAt: new Date().toISOString(),
-                    isTieBreak:
-                      (scores.scoreA === 6 && scores.scoreB === 5) ||
-                      (scores.scoreA === 5 && scores.scoreB === 6),
-                    scoreProposal: {
-                      scoreA: scores.scoreA,
-                      scoreB: scores.scoreB,
-                      submittedByParticipantId: participantId,
-                      submittedAt: new Date().toISOString(),
-                      acceptedByParticipantIds: [participantId],
-                      disputedByParticipantIds: [],
-                      comments: [],
-                      status: "accepted" as const,
-                    },
-                  }
-                : match,
-            ),
-          }
-        : round,
-    );
-
-    return withDerivedEventState({
-      ...event,
-      rounds: nextRounds,
-      notifications: [
-        ...event.notifications,
-        createEventNotification({
-          eventId,
-          roundNumber,
-          message: "점수가 등록되었습니다.",
-          type: "success",
-        }),
-      ],
-    });
-  });
+  return updateEvent(eventId, (event) =>
+    applyMatchScoreUpdate(event, {
+      roundNumber,
+      matchId,
+      scores,
+      actor,
+      participantId,
+      source: "player",
+    }),
+  );
 }
 
 export async function respondToScoreProposal(
