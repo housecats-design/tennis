@@ -1057,6 +1057,7 @@ export async function createEvent(input: {
   roundViewMode: RoundViewMode;
   hostName: string;
   hostUserId?: string;
+  hostGender?: ParticipantGender | null;
 }): Promise<{ event: EventRecord; hostParticipant: Participant }> {
   const sessionId = input.hostUserId ?? getSessionId("host");
   const eventId = makeId("event");
@@ -1068,7 +1069,7 @@ export async function createEvent(input: {
     sessionId,
     userId: input.hostUserId ?? sessionId,
     joinedAsClubId: input.eventType === "club" ? input.clubId ?? null : null,
-    gender: "unspecified",
+    gender: input.hostGender ?? "unspecified",
     guestNtrp: null,
     hostSkillOverride: "medium",
     source: "host",

@@ -140,6 +140,7 @@ export default function GuestEventPage() {
   const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
   const [showAllRounds, setShowAllRounds] = useState(false);
   const [submittingScore, setSubmittingScore] = useState(false);
+  const [pendingScoreConfirmation, setPendingScoreConfirmation] = useState<{ scoreA: number; scoreB: number } | null>(null);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -336,6 +337,7 @@ export default function GuestEventPage() {
         setNotifications(getEventNotifications(nextEvent, participantId));
       }
       setScoreDraft({ scoreA: "", scoreB: "" });
+      setPendingScoreConfirmation(null);
       setToastMessage("점수가 등록되었습니다.");
       window.setTimeout(() => setToastMessage(null), 1800);
     } finally {
@@ -362,10 +364,8 @@ export default function GuestEventPage() {
     }
 
     if (shouldConfirmScoreBeforeSave(scoreA, scoreB)) {
-      const shouldApply = window.confirm("이렇게 입력하시겠습니까?");
-      if (!shouldApply) {
-        return;
-      }
+      setPendingScoreConfirmation({ scoreA, scoreB });
+      return;
     }
 
     await submitProposalScores(scoreA, scoreB);
@@ -545,7 +545,10 @@ export default function GuestEventPage() {
                 {teamALabel}
                 <select
                   value={scoreDraft.scoreA}
-                  onChange={(event) => setScoreDraft((current) => ({ ...current, scoreA: event.target.value }))}
+                  onChange={(event) => {
+                    setPendingScoreConfirmation(null);
+                    setScoreDraft((current) => ({ ...current, scoreA: event.target.value }));
+                  }}
                   className="poster-input"
                 >
                   {SCORE_OPTIONS.map((option) => (
@@ -559,7 +562,10 @@ export default function GuestEventPage() {
                 {teamBLabel}
                 <select
                   value={scoreDraft.scoreB}
-                  onChange={(event) => setScoreDraft((current) => ({ ...current, scoreB: event.target.value }))}
+                  onChange={(event) => {
+                    setPendingScoreConfirmation(null);
+                    setScoreDraft((current) => ({ ...current, scoreB: event.target.value }));
+                  }}
                   className="poster-input"
                 >
                   {SCORE_OPTIONS.map((option) => (
@@ -570,13 +576,39 @@ export default function GuestEventPage() {
                 </select>
               </label>
             </div>
+            {pendingScoreConfirmation ? (
+              <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="font-semibold">비정상 점수입니다. 어떻게 진행하시겠습니까?</div>
+                <div className="mt-1">
+                  {teamALabel} {pendingScoreConfirmation.scoreA} : {teamBLabel} {pendingScoreConfirmation.scoreB}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void submitProposalScores(pendingScoreConfirmation.scoreA, pendingScoreConfirmation.scoreB)}
+                    disabled={submittingScore}
+                    className="poster-button disabled:opacity-60"
+                  >
+                    저장
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingScoreConfirmation(null)}
+                    disabled={submittingScore}
+                    className="poster-button-secondary disabled:opacity-60"
+                  >
+                    다시 수정
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleSubmitProposal()}
-              disabled={submittingScore}
+              disabled={submittingScore || Boolean(pendingScoreConfirmation)}
               className="poster-button w-fit disabled:opacity-60"
             >
-              {submittingScore ? "저장 중..." : "점수 등록"}
+              {submittingScore ? "저장 중..." : "점수올리기"}
             </button>
 
             {currentMatch.lastScoreUpdatedAt ? (

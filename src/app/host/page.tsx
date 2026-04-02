@@ -97,6 +97,7 @@ export default function HostPage() {
       roundCount: input.roundCount,
       roundViewMode: input.roundViewMode,
       hostUserId: input.hostUserId,
+      hostGender: profile?.gender ?? "unspecified",
     });
 
     saveLastEvent(nextEvent.id);

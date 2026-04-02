@@ -71,6 +71,14 @@ function formatLastUpdated(value: string | null | undefined): string {
   }).format(date);
 }
 
+function getRoundParticipantStatusLabel(round: NonNullable<Awaited<ReturnType<typeof loadEvent>>>["rounds"][number], participantId: string): string {
+  const isPlaying = round.matches.some((match) =>
+    [...match.teamA, ...match.teamB].some((player) => player.id === participantId),
+  );
+
+  return isPlaying ? "게임중" : "대기";
+}
+
 export default function HostEventPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -458,6 +466,27 @@ export default function HostEventPage() {
 
     const key = `${roundNumber}:${matchId}`;
     const participantIds = matchEditDrafts[key] ?? [];
+    const targetRound = event.rounds.find((round) => round.roundNumber === roundNumber);
+    const targetMatch = targetRound?.matches.find((match) => match.id === matchId);
+    const currentIds = targetMatch ? [...targetMatch.teamA, ...targetMatch.teamB].map((player) => player.id) : [];
+    const slotCount = event.matchType === "singles" ? 2 : 4;
+    const isDirty = participantIds.length > 0 && participantIds.some((playerId, index) => playerId !== currentIds[index]);
+    const hasEmptySlot = participantIds.length !== slotCount || participantIds.some((playerId) => !playerId);
+    const hasDuplicatePlayer = new Set(participantIds.filter(Boolean)).size !== participantIds.filter(Boolean).length;
+
+    if (!isDirty) {
+      setRoundActionInfo("선수 구성이 바뀐 뒤 저장할 수 있습니다.");
+      return;
+    }
+    if (hasEmptySlot) {
+      setError("모든 선수 자리를 선택해야 합니다.");
+      return;
+    }
+    if (hasDuplicatePlayer) {
+      setError("같은 선수를 중복 선택할 수 없습니다.");
+      return;
+    }
+
     setSavingDirectMatchKey(key);
     if (!window.confirm("선수 직접 편집 내용을 반영하시겠습니까? 현재 경기의 점수와 확인 상태는 초기화됩니다.")) {
       setSavingDirectMatchKey(null);
@@ -1088,7 +1117,7 @@ export default function HostEventPage() {
                       const isDirty = draft.length > 0 && draft.some((playerId, index) => playerId !== playerIds[index]);
                       const hasEmptySlot = draft.length !== slotCount || draft.some((playerId) => !playerId);
                       const hasDuplicatePlayer = new Set(draft.filter(Boolean)).size !== draft.filter(Boolean).length;
-                      const canSaveDirectEdit = isDirty && !hasEmptySlot && !hasDuplicatePlayer && savingDirectMatchKey !== draftKey;
+                      const canSaveDirectEdit = savingDirectMatchKey !== draftKey;
                       return (
                         <>
                     <p className="poster-label">Court {match.court}</p>
@@ -1121,8 +1150,8 @@ export default function HostEventPage() {
                                     >
                                       <option value="">선수 선택</option>
                                       {pool.map((player) => (
-                                        <option key={`${draftKey}-${player.id}`} value={player.id}>
-                                          {player.name}
+                                      <option key={`${draftKey}-${player.id}`} value={player.id}>
+                                          {player.name} ({getRoundParticipantStatusLabel(round, player.id)})
                                         </option>
                                       ))}
                                     </select>
