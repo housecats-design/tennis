@@ -72,10 +72,11 @@ export function GlobalInvitationOverlay() {
     };
   }, []);
 
-  const pendingInvitation = useMemo(
-    () => invitations.find((invitation) => invitation.status === "pending") ?? null,
+  const pendingInvitations = useMemo(
+    () => invitations.filter((invitation) => invitation.status === "pending"),
     [invitations],
   );
+  const pendingInvitation = pendingInvitations[0] ?? null;
 
   async function handleInvitationResponse(invitation: Invitation, response: "accept" | "decline"): Promise<void> {
     if (!profile) {
@@ -120,7 +121,7 @@ export function GlobalInvitationOverlay() {
     }
   }
 
-  if (loading || !profile || invitations.length === 0) {
+  if (loading || !profile || pendingInvitations.length === 0) {
     return null;
   }
 
@@ -134,7 +135,7 @@ export function GlobalInvitationOverlay() {
               현재 위치: {pathname}
             </div>
           </div>
-          <div className="text-sm font-semibold text-ink/70">{invitations.filter((invitation) => invitation.status === "pending").length}건</div>
+          <div className="text-sm font-semibold text-ink/70">{pendingInvitations.length}건</div>
         </div>
 
         {pendingInvitation ? (
