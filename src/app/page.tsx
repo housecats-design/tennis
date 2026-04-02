@@ -11,7 +11,7 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { findMostRecentActiveEventForUser, forceEndEvent, getCurrentRound, joinEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { dismissInvitation, findMostRecentActiveEventForUser, forceEndEvent, getCurrentRound, joinEvent, loadReturnableParticipationSession, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
 import {
   clearLastParticipation,
   clearPostLoginRedirect,
@@ -67,6 +67,8 @@ export default function HomePage() {
   const [emailStatus, setEmailStatus] = useState<FieldStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetInfo, setResetInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -81,6 +83,7 @@ export default function HomePage() {
     role: "host" | "guest";
   } | null>(null);
   const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
+  const recentInvitationItems = invitations.filter((invitation) => invitation.status !== "pending");
 
   async function refreshActiveEventSummary(userId: string): Promise<void> {
     const activeEvent = await withTimeout(
@@ -90,25 +93,53 @@ export default function HomePage() {
       "findMostRecentActiveEventForUser",
     );
 
-    if (!activeEvent) {
+    if (activeEvent) {
+      saveLastEvent(activeEvent.event.id);
+      saveLastParticipant(activeEvent.participant.id);
+      const currentRound = getCurrentRound(activeEvent.event);
+      setResumeRoute(activeEvent.route);
+      setActiveEventSummary({
+        eventId: activeEvent.event.id,
+        eventName: activeEvent.event.eventName,
+        currentRoundLabel: currentRound ? `${currentRound.roundNumber}라운드` : "대기 중",
+        participantCount: activeEvent.event.participants.length,
+        statusLabel: activeEvent.event.status === "in_progress" ? "진행중" : activeEvent.event.status,
+        route: activeEvent.route,
+        role: activeEvent.role,
+      });
+      return;
+    }
+
+    const returnableSession = await withTimeout(
+      loadReturnableParticipationSession(userId),
+      HOME_AUTH_TIMEOUT_MS,
+      null,
+      "loadReturnableParticipationSession",
+    );
+
+    if (!returnableSession) {
       clearLastParticipation();
       setResumeRoute(null);
       setActiveEventSummary(null);
       return;
     }
 
-    saveLastEvent(activeEvent.event.id);
-    saveLastParticipant(activeEvent.participant.id);
-    const currentRound = getCurrentRound(activeEvent.event);
-    setResumeRoute(activeEvent.route);
+    const route =
+      returnableSession.participant.role === "host"
+        ? `/host/event/${returnableSession.event.id}`
+        : `/guest/event/${returnableSession.event.id}`;
+    const currentRound = getCurrentRound(returnableSession.event);
+    saveLastEvent(returnableSession.event.id);
+    saveLastParticipant(returnableSession.participant.id);
+    setResumeRoute(route);
     setActiveEventSummary({
-      eventId: activeEvent.event.id,
-      eventName: activeEvent.event.eventName,
+      eventId: returnableSession.event.id,
+      eventName: returnableSession.event.eventName,
       currentRoundLabel: currentRound ? `${currentRound.roundNumber}라운드` : "대기 중",
-      participantCount: activeEvent.event.participants.length,
-      statusLabel: activeEvent.event.status === "in_progress" ? "진행중" : activeEvent.event.status,
-      route: activeEvent.route,
-      role: activeEvent.role,
+      participantCount: returnableSession.event.participants.length,
+      statusLabel: returnableSession.event.status === "in_progress" ? "진행중" : returnableSession.event.status,
+      route,
+      role: returnableSession.participant.role === "host" ? "host" : "guest",
     });
   }
 
@@ -203,6 +234,8 @@ export default function HomePage() {
     event.preventDefault();
     setError(null);
     setInfo(null);
+    setResetError(null);
+    setResetInfo(null);
     setSubmitting(true);
 
     try {
@@ -254,15 +287,25 @@ export default function HomePage() {
   }
 
   async function handlePasswordReset(): Promise<void> {
-    setError(null);
-    setInfo(null);
+    setResetError(null);
+    setResetInfo(null);
+
+    if (!identifier.trim()) {
+      setResetError("비밀번호 재설정 메일을 보내려면 이메일을 먼저 입력해 주세요.");
+      return;
+    }
+
+    if (!window.confirm("입력한 이메일로 비밀번호 재설정 메일을 보내시겠습니까?")) {
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       await requestPasswordReset(identifier);
-      setInfo("비밀번호 재설정 메일을 보냈습니다. 메일의 링크에서 새 비밀번호를 설정해 주세요.");
+      setResetInfo("비밀번호 재설정 메일을 보냈습니다. 메일의 링크에서 새 비밀번호를 설정해 주세요.");
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : "비밀번호 재설정 메일 전송에 실패했습니다.");
+      setResetError(resetError instanceof Error ? resetError.message : "비밀번호 재설정 메일 전송에 실패했습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -397,6 +440,20 @@ export default function HomePage() {
     }
   }
 
+  async function handleDismissInvitation(invitation: Invitation): Promise<void> {
+    if (!profile || invitation.status === "pending") {
+      return;
+    }
+
+    setError(null);
+    try {
+      await dismissInvitation(invitation.eventId, invitation.id);
+      setInvitations(await loadUserInvitations(profile.id));
+    } catch (dismissError) {
+      setError(dismissError instanceof Error ? dismissError.message : "알림 삭제에 실패했습니다.");
+    }
+  }
+
   async function handleForceEndFromMain(): Promise<void> {
     if (!activeEventSummary || activeEventSummary.role !== "host") {
       return;
@@ -475,6 +532,7 @@ export default function HomePage() {
                     <div className="text-sm font-semibold text-accentStrong">진행중 이벤트</div>
                     <div className="mt-2 text-2xl font-black">{activeEventSummary.eventName}</div>
                     <div className="mt-3 grid gap-2 text-sm text-ink/72 sm:grid-cols-3">
+                      <div>현재 역할: {activeEventSummary.role === "host" ? "호스트" : "플레이어"}</div>
                       <div>현재 라운드: {activeEventSummary.currentRoundLabel}</div>
                       <div>참가자 수: {activeEventSummary.participantCount}명</div>
                       <div>상태: {activeEventSummary.statusLabel}</div>
@@ -508,14 +566,19 @@ export default function HomePage() {
               {lastRole ? (
                 <div className="mt-4 text-xs text-ink/55">메인 페이지 최근 선택 역할: {lastRole === "host" ? "호스트" : "플레이어"}</div>
               ) : null}
-              {invitations.length > 0 ? (
+              {recentInvitationItems.length > 0 ? (
               <div className="mt-8 border-t border-line pt-6">
                 <div className="flex items-center justify-between">
-                  <div className="text-xl font-black">최근 초대 및 중요 알림 <span className="text-accentStrong">[{invitations.length}]</span></div>
+                  <div className="text-xl font-black">최근 초대 및 중요 알림 <span className="text-accentStrong">[{recentInvitationItems.length}]</span></div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {invitations.slice(0, 6).map((invitation) => (
-                    <div key={invitation.id} className="border-b border-line py-3 text-sm">
+                  {recentInvitationItems.slice(0, 6).map((invitation) => (
+                    <button
+                      key={invitation.id}
+                      type="button"
+                      onClick={() => void handleDismissInvitation(invitation)}
+                      className="block w-full border-b border-line py-3 text-left text-sm transition hover:bg-surface/70"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="font-semibold">
                           {invitation.status === "pending" ? "초대 도착" : invitation.status === "accepted" ? "초대 수락" : invitation.status === "declined" ? "초대 거절" : "초대 만료"}
@@ -523,8 +586,8 @@ export default function HomePage() {
                         <div className="text-xs text-ink/55">{formatNotificationTime(invitation.createdAt)}</div>
                       </div>
                       <div className="mt-1 text-ink/80">{invitation.eventName}</div>
-                      <div className="mt-1 text-xs text-ink/55">{invitation.status === "pending" ? "읽지 않음" : "읽음"}</div>
-                    </div>
+                      <div className="mt-1 text-xs text-ink/55">누르면 목록에서 삭제됩니다.</div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -578,14 +641,6 @@ export default function HomePage() {
                   비밀번호
                   <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="poster-input" />
                 </label>
-                <button
-                  type="button"
-                  onClick={() => void handlePasswordReset()}
-                  disabled={submitting}
-                  className="w-fit text-sm font-semibold text-accentStrong disabled:opacity-60"
-                >
-                  비밀번호 재설정 메일 보내기
-                </button>
               </>
             ) : (
               <>
@@ -675,6 +730,21 @@ export default function HomePage() {
             <button type="submit" disabled={submitting} className="poster-button w-fit disabled:opacity-60">
               {submitting ? "처리 중..." : mode === "login" ? "로그인" : "회원가입"}
             </button>
+
+            {mode === "login" ? (
+              <div className="grid gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handlePasswordReset()}
+                  disabled={submitting}
+                  className="w-fit text-sm font-semibold text-accentStrong disabled:opacity-60"
+                >
+                  비밀번호 재설정 메일 보내기
+                </button>
+                {resetError ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{resetError}</div> : null}
+                {resetInfo ? <div className="border-l-2 border-accentStrong pl-4 text-sm text-ink/72">{resetInfo}</div> : null}
+              </div>
+            ) : null}
           </form>
         ) : null}
         {!profile && authLoading ? <div className="border-y border-line py-8 text-sm text-ink/70">세션을 확인하는 중...</div> : null}

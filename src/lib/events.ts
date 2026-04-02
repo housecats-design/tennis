@@ -1136,6 +1136,16 @@ export async function updateInvitationStatus(
   }));
 }
 
+export async function dismissInvitation(
+  eventId: string,
+  invitationId: string,
+): Promise<EventRecord | null> {
+  return updateEvent(eventId, (event) => ({
+    ...event,
+    invitations: safeArray(event.invitations).filter((invitation) => invitation.id !== invitationId),
+  }));
+}
+
 export async function loadUserInvitations(userId: string): Promise<Invitation[]> {
   if (!userId) {
     return [];
