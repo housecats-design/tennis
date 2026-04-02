@@ -82,6 +82,36 @@ export default function HomePage() {
   } | null>(null);
   const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
 
+  async function refreshActiveEventSummary(userId: string): Promise<void> {
+    const activeEvent = await withTimeout(
+      findMostRecentActiveEventForUser(userId),
+      HOME_AUTH_TIMEOUT_MS,
+      null,
+      "findMostRecentActiveEventForUser",
+    );
+
+    if (!activeEvent) {
+      clearLastParticipation();
+      setResumeRoute(null);
+      setActiveEventSummary(null);
+      return;
+    }
+
+    saveLastEvent(activeEvent.event.id);
+    saveLastParticipant(activeEvent.participant.id);
+    const currentRound = getCurrentRound(activeEvent.event);
+    setResumeRoute(activeEvent.route);
+    setActiveEventSummary({
+      eventId: activeEvent.event.id,
+      eventName: activeEvent.event.eventName,
+      currentRoundLabel: currentRound ? `${currentRound.roundNumber}라운드` : "대기 중",
+      participantCount: activeEvent.event.participants.length,
+      statusLabel: activeEvent.event.status === "in_progress" ? "진행중" : activeEvent.event.status,
+      route: activeEvent.route,
+      role: activeEvent.role,
+    });
+  }
+
   function formatNotificationTime(value: string): string {
     const date = new Date(value);
     const now = new Date();
@@ -127,31 +157,7 @@ export default function HomePage() {
               "loadUserInvitations",
             ),
           );
-          const activeEvent = await withTimeout(
-            findMostRecentActiveEventForUser(nextProfile.id),
-            HOME_AUTH_TIMEOUT_MS,
-            null,
-            "findMostRecentActiveEventForUser",
-          );
-          if (activeEvent) {
-            saveLastEvent(activeEvent.event.id);
-            saveLastParticipant(activeEvent.participant.id);
-            const currentRound = getCurrentRound(activeEvent.event);
-            setResumeRoute(activeEvent.route);
-            setActiveEventSummary({
-              eventId: activeEvent.event.id,
-              eventName: activeEvent.event.eventName,
-              currentRoundLabel: currentRound ? `${currentRound.roundNumber}라운드` : "대기 중",
-              participantCount: activeEvent.event.participants.length,
-              statusLabel: activeEvent.event.status === "in_progress" ? "진행중" : activeEvent.event.status,
-              route: activeEvent.route,
-              role: activeEvent.role,
-            });
-          } else {
-            clearLastParticipation();
-            setResumeRoute(null);
-            setActiveEventSummary(null);
-          }
+          await refreshActiveEventSummary(nextProfile.id);
         } else {
           setInvitations([]);
           setResumeRoute(null);
@@ -185,6 +191,7 @@ export default function HomePage() {
 
     const interval = window.setInterval(() => {
       void loadUserInvitations(profile.id).then(setInvitations);
+      void refreshActiveEventSummary(profile.id);
     }, 1000);
 
     return () => {
@@ -203,6 +210,7 @@ export default function HomePage() {
         const nextProfile = await signInAccount(identifier, password);
         setProfile(nextProfile);
         setInvitations(await loadUserInvitations(nextProfile.id));
+        await refreshActiveEventSummary(nextProfile.id);
         const redirectUrl = loadPostLoginRedirect();
         if (redirectUrl) {
           clearPostLoginRedirect();
