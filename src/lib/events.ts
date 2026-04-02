@@ -963,6 +963,41 @@ export async function createMemberInvitations(
     return loadEvent(eventId);
   }
 
+  const allEvents = await loadEventsFromSource();
+  const blockedUsers = uniqueUserIds
+    .map((userId) => {
+      const activeEvent = allEvents.find(
+        (event) =>
+          event.id !== eventId &&
+          ["recruiting", "in_progress"].includes(event.status) &&
+          event.participants.some(
+            (participant) =>
+              participant.userId === userId &&
+              participant.isActive !== false &&
+              (participant.availabilityState ?? "active") === "active",
+          ),
+      );
+
+      if (!activeEvent) {
+        return null;
+      }
+
+      const invitedUser = input.userDirectory?.find((user) => user.id === userId);
+      return {
+        userId,
+        name: invitedUser?.displayName ?? invitedUser?.email ?? "사용자",
+      };
+    })
+    .filter(Boolean) as Array<{ userId: string; name: string }>;
+
+  if (blockedUsers.length > 0) {
+    throw new Error(
+      blockedUsers.length === 1
+        ? `${blockedUsers[0].name}님은 현재 다른 이벤트에 참가 중입니다.`
+        : "선택한 사용자 중 현재 다른 이벤트에 참가 중인 사용자가 있습니다.",
+    );
+  }
+
   return updateEvent(eventId, (event) => {
     const nextInvitations = [...safeArray(event.invitations)];
     const nextNotifications = [...event.notifications];

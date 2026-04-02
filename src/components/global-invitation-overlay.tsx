@@ -120,7 +120,7 @@ export function GlobalInvitationOverlay() {
     }
   }
 
-  if (loading || !profile) {
+  if (loading || !profile || invitations.length === 0) {
     return null;
   }
 
@@ -161,9 +161,7 @@ export function GlobalInvitationOverlay() {
               </button>
             </div>
           </div>
-        ) : (
-          <div className="mt-3 text-sm text-ink/60">새 초대가 없습니다.</div>
-        )}
+        ) : null}
 
         {error ? <div className="mt-3 text-sm text-red-700">{error}</div> : null}
       </div>

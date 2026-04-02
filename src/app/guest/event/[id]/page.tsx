@@ -142,6 +142,7 @@ export default function GuestEventPage() {
   const [showAllRounds, setShowAllRounds] = useState(false);
   const [submittingScore, setSubmittingScore] = useState(false);
   const [pendingScoreConfirmation, setPendingScoreConfirmation] = useState<{ scoreA: number; scoreB: number } | null>(null);
+  const [pendingFinalConfirmation, setPendingFinalConfirmation] = useState<{ scoreA: number; scoreB: number } | null>(null);
   const lastSignalRef = useRef("");
 
   useEffect(() => {
@@ -354,6 +355,7 @@ export default function GuestEventPage() {
       }
       setScoreDraft({ scoreA: "", scoreB: "" });
       setPendingScoreConfirmation(null);
+      setPendingFinalConfirmation(null);
       setToastMessage("점수가 반영되었습니다. 다음 경기 정보를 확인해 주세요.");
       window.setTimeout(() => setToastMessage(null), 1800);
     } finally {
@@ -384,7 +386,7 @@ export default function GuestEventPage() {
       return;
     }
 
-    await submitProposalScores(scoreA, scoreB);
+    setPendingFinalConfirmation({ scoreA, scoreB });
   }
 
   async function handleDispute(roundNumber: number, matchId: string): Promise<void> {
@@ -563,6 +565,7 @@ export default function GuestEventPage() {
                   value={scoreDraft.scoreA}
                   onChange={(event) => {
                     setPendingScoreConfirmation(null);
+                    setPendingFinalConfirmation(null);
                     setScoreDraft((current) => ({ ...current, scoreA: event.target.value }));
                   }}
                   className="poster-input"
@@ -580,6 +583,7 @@ export default function GuestEventPage() {
                   value={scoreDraft.scoreB}
                   onChange={(event) => {
                     setPendingScoreConfirmation(null);
+                    setPendingFinalConfirmation(null);
                     setScoreDraft((current) => ({ ...current, scoreB: event.target.value }));
                   }}
                   className="poster-input"
@@ -601,7 +605,13 @@ export default function GuestEventPage() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => void submitProposalScores(pendingScoreConfirmation.scoreA, pendingScoreConfirmation.scoreB)}
+                    onClick={() => {
+                      setPendingFinalConfirmation({
+                        scoreA: pendingScoreConfirmation.scoreA,
+                        scoreB: pendingScoreConfirmation.scoreB,
+                      });
+                      setPendingScoreConfirmation(null);
+                    }}
                     disabled={submittingScore}
                     className="poster-button disabled:opacity-60"
                   >
@@ -618,10 +628,36 @@ export default function GuestEventPage() {
                 </div>
               </div>
             ) : null}
+            {pendingFinalConfirmation ? (
+              <div className="border border-accentStrong/25 bg-surface px-4 py-3 text-sm text-ink">
+                <div className="font-semibold">입력한 점수가 맞습니까?</div>
+                <div className="mt-1">
+                  {teamALabel} {pendingFinalConfirmation.scoreA} : {teamBLabel} {pendingFinalConfirmation.scoreB}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void submitProposalScores(pendingFinalConfirmation.scoreA, pendingFinalConfirmation.scoreB)}
+                    disabled={submittingScore}
+                    className="poster-button disabled:opacity-60"
+                  >
+                    네
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingFinalConfirmation(null)}
+                    disabled={submittingScore}
+                    className="poster-button-secondary disabled:opacity-60"
+                  >
+                    아니요
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleSubmitProposal()}
-              disabled={submittingScore || Boolean(pendingScoreConfirmation)}
+              disabled={submittingScore || Boolean(pendingScoreConfirmation) || Boolean(pendingFinalConfirmation)}
               className="poster-button w-fit disabled:opacity-60"
             >
               {submittingScore ? "저장 중..." : "점수올리기"}

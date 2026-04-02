@@ -358,18 +358,23 @@ export default function HostEventPage() {
       return;
     }
 
-    const nextEvent = await createMemberInvitations(event.id, {
-      invitedUserIds: userIds,
-      invitedByUserId: profile.id,
-      invitedByName: profile.displayName,
-      userDirectory: members.map((member) => ({
-        id: member.id,
-        email: member.email,
-        displayName: member.displayName,
-      })),
-    });
-    setEvent(nextEvent);
-    setRoundActionInfo("초대되었습니다.");
+    try {
+      const nextEvent = await createMemberInvitations(event.id, {
+        invitedUserIds: userIds,
+        invitedByUserId: profile.id,
+        invitedByName: profile.displayName,
+        userDirectory: members.map((member) => ({
+          id: member.id,
+          email: member.email,
+          displayName: member.displayName,
+        })),
+      });
+      setEvent(nextEvent);
+      setRoundActionInfo("초대되었습니다.");
+      setError(null);
+    } catch (inviteError) {
+      setError(inviteError instanceof Error ? inviteError.message : "초대에 실패했습니다.");
+    }
   }
 
   async function handleAddMemberParticipant(): Promise<void> {
@@ -1272,32 +1277,6 @@ export default function HostEventPage() {
                         </div>
                       </div>
                     ) : null}
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleSkipMatch(round.roundNumber, match.id ?? "")}
-                        disabled={round.completed}
-                        className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
-                      >
-                        {match.skipped ? "건너뛰기 취소" : "경기 건너뛰기"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReassignSingleMatch(round.roundNumber, match.id ?? "")}
-                        disabled={round.completed}
-                        className="border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                      >
-                        이 경기만 재배정
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReassignRound(round.roundNumber)}
-                        disabled={round.completed}
-                        className="border border-line px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                      >
-                        이후 라운드 재배정
-                      </button>
-                    </div>
                     {match.skipped ? (
                       <div className="mt-3">
                         <span className="text-xs font-bold uppercase tracking-[0.18em] text-red-700">건너뜀</span>
@@ -1353,7 +1332,7 @@ export default function HostEventPage() {
                     onClick={() => handleReassignRound(round.roundNumber)}
                     className="poster-button-secondary"
                   >
-                    라운드 재배정
+                    이후 라운드 재배정
                   </button>
                   <button
                     type="button"
