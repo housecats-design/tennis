@@ -1318,6 +1318,35 @@ export async function joinEvent(
     return existingByUser;
   }
   if (existingBySession) {
+    if (input.userId && existingBySession.userId !== input.userId) {
+      const nextEvent = await updateEvent(eventId, (currentEvent) => ({
+        ...currentEvent,
+        participants: currentEvent.participants.map((participant) =>
+          participant.id === existingBySession.id
+            ? {
+                ...participant,
+                userId: input.userId ?? participant.userId ?? null,
+              }
+            : participant,
+        ),
+        invitations: safeArray(currentEvent.invitations).map((invitation) =>
+          invitation.id === input.inviteId
+            ? {
+                ...invitation,
+                status: "accepted",
+                respondedAt: new Date().toISOString(),
+              }
+            : invitation,
+        ),
+      }));
+
+      const linkedParticipant = nextEvent?.participants.find((participant) => participant.id === existingBySession.id);
+      if (input.inviteId) {
+        await updateInvitationStatus(eventId, input.inviteId, "accepted");
+      }
+      return linkedParticipant ?? { ...existingBySession, userId: input.userId };
+    }
+
     if (input.inviteId) {
       await updateInvitationStatus(eventId, input.inviteId, "accepted");
     }
