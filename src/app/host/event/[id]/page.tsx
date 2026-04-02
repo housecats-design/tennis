@@ -22,6 +22,7 @@ import {
   saveParticipants,
   skipMatch,
   subscribeToEvent,
+  listInvitableUserIds,
   updateRoundMatchAssignment,
   updateMatchScores,
 } from "@/lib/events";
@@ -112,6 +113,7 @@ export default function HostEventPage() {
   const [finalRanking, setFinalRanking] = useState<RankedPlayer[]>([]);
   const [pendingRoundFinalize, setPendingRoundFinalize] = useState<number | null>(null);
   const [showForceEndDialog, setShowForceEndDialog] = useState(false);
+  const [invitableRecommendedUserIds, setInvitableRecommendedUserIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!eventId) {
@@ -216,8 +218,13 @@ export default function HostEventPage() {
   const recommendedInviteMembers = useMemo(() => {
     const invitedUserIds = new Set((event?.invitations ?? []).filter((invitation) => invitation.status === "pending" || invitation.status === "accepted").map((invitation) => invitation.invitedUserId));
     const availableUserIds = new Set(availableMembers.map((member) => member.id));
-    return recommendedMembers.filter((member) => availableUserIds.has(member.userId) && !invitedUserIds.has(member.userId));
-  }, [availableMembers, event?.invitations, recommendedMembers]);
+    return recommendedMembers.filter(
+      (member) =>
+        availableUserIds.has(member.userId) &&
+        !invitedUserIds.has(member.userId) &&
+        invitableRecommendedUserIds.has(member.userId),
+    );
+  }, [availableMembers, event?.invitations, invitableRecommendedUserIds, recommendedMembers]);
   const participantSummary = useMemo(() => {
     const participants = event?.participants ?? [];
     return {
@@ -272,6 +279,41 @@ export default function HostEventPage() {
       window.clearTimeout(timer);
     };
   }, [event?.status, router]);
+
+  useEffect(() => {
+    if (!event) {
+      setInvitableRecommendedUserIds(new Set());
+      return;
+    }
+
+    const candidateIds = recommendedMembers
+      .map((member) => member.userId)
+      .filter((userId) => availableMembers.some((member) => member.id === userId));
+
+    if (candidateIds.length === 0) {
+      setInvitableRecommendedUserIds(new Set());
+      return;
+    }
+
+    let active = true;
+    void listInvitableUserIds(candidateIds, event.id)
+      .then((userIds) => {
+        if (!active) {
+          return;
+        }
+        setInvitableRecommendedUserIds(new Set(userIds));
+      })
+      .catch((inviteEligibilityError) => {
+        console.error("[host-event] failed to load invitable recommended users", inviteEligibilityError);
+        if (active) {
+          setInvitableRecommendedUserIds(new Set());
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [availableMembers, event, recommendedMembers]);
 
   async function handleParticipantChange(
     participantId: string,

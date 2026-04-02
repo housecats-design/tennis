@@ -745,6 +745,86 @@ export async function findLatestHostEvent(hostUserId: string): Promise<EventReco
   );
 }
 
+type ActiveEventParticipation = {
+  event: EventRecord;
+  participant: Participant;
+  route: string;
+  role: "host" | "guest";
+};
+
+function isUserActiveInEvent(event: EventRecord, userId: string): Participant | null {
+  if (!["recruiting", "in_progress"].includes(event.status)) {
+    return null;
+  }
+
+  const participant = event.participants.find(
+    (item) =>
+      item.userId === userId &&
+      item.isActive !== false &&
+      (item.availabilityState ?? "active") === "active",
+  );
+
+  if (participant) {
+    return participant;
+  }
+
+  if (event.hostUserId === userId) {
+    return (
+      event.participants.find((item) => item.role === "host" && item.userId === userId) ??
+      null
+    );
+  }
+
+  return null;
+}
+
+export async function findMostRecentActiveEventForUser(
+  userId: string,
+  options?: { excludeEventId?: string | null },
+): Promise<ActiveEventParticipation | null> {
+  if (!userId) {
+    return null;
+  }
+
+  const events = await loadEventsFromSource();
+  const activeEvents = events
+    .filter((event) => event.id !== options?.excludeEventId)
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+
+  for (const event of activeEvents) {
+    const participant = isUserActiveInEvent(event, userId);
+    if (!participant) {
+      continue;
+    }
+
+    const role = participant.role === "host" ? "host" : "guest";
+    return {
+      event,
+      participant,
+      role,
+      route: role === "host" ? `/host/event/${event.id}` : `/guest/event/${event.id}`,
+    };
+  }
+
+  return null;
+}
+
+export async function listInvitableUserIds(userIds: string[], eventId: string): Promise<string[]> {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) {
+    return [];
+  }
+
+  const results = await Promise.all(
+    uniqueUserIds.map(async (userId) => ({
+      userId,
+      active: await findMostRecentActiveEventForUser(userId, { excludeEventId: eventId }),
+    })),
+  );
+
+  return results.filter((result) => !result.active).map((result) => result.userId);
+}
+
 function emitEventUpdate(event: EventRecord): void {
   const channel = createEventBroadcastChannel(event.id);
   channel?.postMessage({ type: "event_updated", eventId: event.id });
@@ -963,31 +1043,22 @@ export async function createMemberInvitations(
     return loadEvent(eventId);
   }
 
-  const allEvents = await loadEventsFromSource();
-  const blockedUsers = uniqueUserIds
-    .map((userId) => {
-      const activeEvent = allEvents.find(
-        (event) =>
-          event.id !== eventId &&
-          ["recruiting", "in_progress"].includes(event.status) &&
-          event.participants.some(
-            (participant) =>
-              participant.userId === userId &&
-              participant.isActive !== false &&
-              (participant.availabilityState ?? "active") === "active",
-          ),
-      );
+  const blockedUsers = (
+    await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const active = await findMostRecentActiveEventForUser(userId, { excludeEventId: eventId });
+        if (!active) {
+          return null;
+        }
 
-      if (!activeEvent) {
-        return null;
-      }
-
-      const invitedUser = input.userDirectory?.find((user) => user.id === userId);
-      return {
-        userId,
-        name: invitedUser?.displayName ?? invitedUser?.email ?? "사용자",
-      };
-    })
+        const invitedUser = input.userDirectory?.find((user) => user.id === userId);
+        return {
+          userId,
+          name: invitedUser?.displayName ?? invitedUser?.email ?? "사용자",
+        };
+      }),
+    )
+  )
     .filter(Boolean) as Array<{ userId: string; name: string }>;
 
   if (blockedUsers.length > 0) {

@@ -11,12 +11,10 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { getReturnableParticipant, joinEvent, loadEvent, loadReturnableParticipationSession, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { findMostRecentActiveEventForUser, forceEndEvent, getCurrentRound, joinEvent, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
 import {
   clearLastParticipation,
   clearPostLoginRedirect,
-  loadLastEvent,
-  loadLastParticipant,
   loadLastRole,
   loadPostLoginRedirect,
   saveLastEvent,
@@ -73,6 +71,15 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [resumeRoute, setResumeRoute] = useState<string | null>(null);
+  const [activeEventSummary, setActiveEventSummary] = useState<{
+    eventId: string;
+    eventName: string;
+    currentRoundLabel: string;
+    participantCount: number;
+    statusLabel: string;
+    route: string;
+    role: "host" | "guest";
+  } | null>(null);
   const pendingInvitation = invitations.find((invitation) => invitation.status === "pending") ?? null;
 
   function formatNotificationTime(value: string): string {
@@ -120,50 +127,41 @@ export default function HomePage() {
               "loadUserInvitations",
             ),
           );
-          const activeSession = await withTimeout(
-            loadReturnableParticipationSession(nextProfile.id),
+          const activeEvent = await withTimeout(
+            findMostRecentActiveEventForUser(nextProfile.id),
             HOME_AUTH_TIMEOUT_MS,
             null,
-            "loadReturnableParticipationSession",
+            "findMostRecentActiveEventForUser",
           );
-          if (activeSession) {
-            saveLastEvent(activeSession.event.id);
-            saveLastParticipant(activeSession.participant.id);
-            setResumeRoute(
-              activeSession.participant.role === "host"
-                ? `/host/event/${activeSession.event.id}`
-                : `/guest/event/${activeSession.event.id}`,
-            );
-          } else {
-            const lastEventId = loadLastEvent();
-            const lastParticipantId = loadLastParticipant();
-            const lastEvent = lastEventId
-              ? await withTimeout(loadEvent(lastEventId), HOME_AUTH_TIMEOUT_MS, null, "loadEvent")
-              : null;
-            const returnableParticipant = getReturnableParticipant(lastEvent, {
-              userId: nextProfile.id,
-              participantId: lastParticipantId,
+          if (activeEvent) {
+            saveLastEvent(activeEvent.event.id);
+            saveLastParticipant(activeEvent.participant.id);
+            const currentRound = getCurrentRound(activeEvent.event);
+            setResumeRoute(activeEvent.route);
+            setActiveEventSummary({
+              eventId: activeEvent.event.id,
+              eventName: activeEvent.event.eventName,
+              currentRoundLabel: currentRound ? `${currentRound.roundNumber}라운드` : "대기 중",
+              participantCount: activeEvent.event.participants.length,
+              statusLabel: activeEvent.event.status === "in_progress" ? "진행중" : activeEvent.event.status,
+              route: activeEvent.route,
+              role: activeEvent.role,
             });
-            const canResume = Boolean(returnableParticipant && lastEvent);
-            if (!canResume) {
-              clearLastParticipation();
-            }
-            setResumeRoute(
-              canResume && lastEvent
-                ? returnableParticipant?.role === "host"
-                  ? `/host/event/${lastEvent.id}`
-                  : `/guest/event/${lastEvent.id}`
-                : null,
-            );
+          } else {
+            clearLastParticipation();
+            setResumeRoute(null);
+            setActiveEventSummary(null);
           }
         } else {
           setInvitations([]);
           setResumeRoute(null);
+          setActiveEventSummary(null);
         }
       } catch (syncError) {
         console.error("[home] auth sync failed", syncError);
         setInvitations([]);
         setResumeRoute(null);
+        setActiveEventSummary(null);
         setError("세션 확인 중 문제가 발생했습니다. 다시 시도해 주세요.");
       } finally {
         setAuthLoading(false);
@@ -391,6 +389,31 @@ export default function HomePage() {
     }
   }
 
+  async function handleForceEndFromMain(): Promise<void> {
+    if (!activeEventSummary || activeEventSummary.role !== "host") {
+      return;
+    }
+
+    if (!window.confirm("정말 종료하시겠습니까?")) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await forceEndEvent(activeEventSummary.eventId);
+      setActiveEventSummary(null);
+      setResumeRoute(null);
+      clearLastParticipation();
+      setInfo("이벤트를 종료했습니다.");
+      router.replace("/");
+    } catch (forceEndError) {
+      setError(forceEndError instanceof Error ? forceEndError.message : "이벤트 종료에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <main className="poster-page flex min-h-screen items-start py-12">
       <section className="grid w-full gap-10 border-t border-line py-10 lg:grid-cols-[1.05fr_0.95fr]">
@@ -433,32 +456,57 @@ export default function HomePage() {
                 <Link href="/clubs" className="poster-button-secondary">
                   클럽
                 </Link>
-                {resumeRoute ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?")) {
-                        router.push(resumeRoute);
-                      }
-                    }}
-                    className="poster-button-secondary"
-                  >
-                    진행중인 경기로 돌아가기
-                  </button>
-                ) : null}
                 <button type="button" onClick={() => void signOutAccount()} className="poster-button-secondary">
                   로그아웃
                 </button>
               </div>
+              <div className="mt-8 border-t border-line pt-6">
+                <div className="text-xl font-black">진행중 이벤트</div>
+                {activeEventSummary ? (
+                  <div className="mt-4 rounded-2xl border border-line bg-surface p-5">
+                    <div className="text-sm font-semibold text-accentStrong">진행중 이벤트</div>
+                    <div className="mt-2 text-2xl font-black">{activeEventSummary.eventName}</div>
+                    <div className="mt-3 grid gap-2 text-sm text-ink/72 sm:grid-cols-3">
+                      <div>현재 라운드: {activeEventSummary.currentRoundLabel}</div>
+                      <div>참가자 수: {activeEventSummary.participantCount}명</div>
+                      <div>상태: {activeEventSummary.statusLabel}</div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => router.push(activeEventSummary.route)}
+                        className="poster-button"
+                      >
+                        이벤트로 돌아가기
+                      </button>
+                      {activeEventSummary.role === "host" ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleForceEndFromMain()}
+                          disabled={submitting}
+                          className="border border-red-200 px-4 py-3 font-semibold text-red-700 disabled:opacity-60"
+                        >
+                          강제 종료
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 border-b border-dashed border-line py-3 text-sm text-ink/65">
+                    현재 진행중인 이벤트가 없습니다.
+                  </div>
+                )}
+              </div>
               {lastRole ? (
                 <div className="mt-4 text-xs text-ink/55">메인 페이지 최근 선택 역할: {lastRole === "host" ? "호스트" : "플레이어"}</div>
               ) : null}
+              {invitations.length > 0 ? (
               <div className="mt-8 border-t border-line pt-6">
                 <div className="flex items-center justify-between">
                   <div className="text-xl font-black">최근 초대 및 중요 알림 <span className="text-accentStrong">[{invitations.length}]</span></div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {invitations.length > 0 ? invitations.slice(0, 6).map((invitation) => (
+                  {invitations.slice(0, 6).map((invitation) => (
                     <div key={invitation.id} className="border-b border-line py-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <div className="font-semibold">
@@ -469,11 +517,10 @@ export default function HomePage() {
                       <div className="mt-1 text-ink/80">{invitation.eventName}</div>
                       <div className="mt-1 text-xs text-ink/55">{invitation.status === "pending" ? "읽지 않음" : "읽음"}</div>
                     </div>
-                  )) : (
-                    <div className="border-b border-dashed border-line py-3 text-sm text-ink/65">최근 초대 및 중요 알림이 없습니다.</div>
-                  )}
+                  ))}
                 </div>
               </div>
+              ) : null}
             </div>
           ) : null}
         </div>
