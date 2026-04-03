@@ -2,7 +2,7 @@
 
 import { getCurrentProfile } from "@/lib/auth";
 import { getClubById } from "@/lib/clubs";
-import { canAccessEventAsHost, loadEvent, subscribeToEvent } from "@/lib/events";
+import { canAccessEventAsHost, canShowParticipantMainPageLink, loadEvent, subscribeToEvent } from "@/lib/events";
 import { buildMatchHistory, sortLeaderboard } from "@/lib/leaderboard";
 import { Player, SortDirection, UserProfile } from "@/lib/types";
 import Link from "next/link";
@@ -58,6 +58,12 @@ export default function EventLeaderboardPage() {
     );
   }, [event, sortDirection]);
   const matchHistory = useMemo(() => (event ? buildMatchHistory(event.rounds) : []), [event]);
+  const participant = useMemo(
+    () => event?.participants.find((item) => item.userId === profile?.id) ?? null,
+    [event, profile?.id],
+  );
+  const isHostView = event ? canAccessEventAsHost(event, profile?.id) : false;
+  const canShowMainPageButton = event && participant ? canShowParticipantMainPageLink(event, participant.id) : true;
 
   if (!event) {
     return <main className="poster-page max-w-3xl text-sm text-ink/70">이벤트가 없습니다.</main>;
@@ -66,14 +72,21 @@ export default function EventLeaderboardPage() {
   return (
     <main className="poster-page max-w-6xl">
       <div className="mb-6 flex flex-wrap gap-3">
-        {canAccessEventAsHost(event, profile?.id) ? (
+        {isHostView ? (
           <Link href={`/host/event/${event.id}`} className="poster-button">
-            Go to Host Dashboard
+            이벤트 관리
           </Link>
         ) : (
-          <Link href="/" className="poster-button">
-            Go to Main Page
-          </Link>
+          <>
+            <Link href={`/guest/event/${event.id}`} className="poster-button">
+              게임으로
+            </Link>
+            {canShowMainPageButton ? (
+              <Link href="/" className="poster-button-secondary">
+                메인페이지
+              </Link>
+            ) : null}
+          </>
         )}
         <button type="button" onClick={() => setSortDirection((current) => (current === "asc" ? "desc" : "asc"))} className="poster-button-secondary">
           승수 정렬 전환

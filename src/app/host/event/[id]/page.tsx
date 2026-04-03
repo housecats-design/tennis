@@ -360,6 +360,11 @@ export default function HostEventPage() {
       return;
     }
 
+    if (!profile?.isAdmin) {
+      setError("일반 호스트는 회원 직접 추가를 사용할 수 없습니다. 초대 기능을 이용해 주세요.");
+      return;
+    }
+
     const normalizedName = newPlayerName.trim().toLowerCase();
     if (event.participants.some((participant) => participant.displayName.trim().toLowerCase() === normalizedName)) {
       setError("이미 같은 이름의 참가자가 있습니다.");
@@ -421,6 +426,11 @@ export default function HostEventPage() {
 
   async function handleAddMemberParticipant(): Promise<void> {
     if (!event || !selectedMemberId) {
+      return;
+    }
+
+    if (!profile?.isAdmin) {
+      setError("일반 호스트는 회원 직접 추가를 사용할 수 없습니다. 초대 기능을 이용해 주세요.");
       return;
     }
 
@@ -928,15 +938,20 @@ export default function HostEventPage() {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                onClick={handleAddMemberParticipant}
-                disabled={!participantsEditable || !selectedMemberId}
-                className="poster-button"
-              >
-                회원 추가
-              </button>
+              {profile?.isAdmin ? (
+                <button
+                  type="button"
+                  onClick={handleAddMemberParticipant}
+                  disabled={!participantsEditable || !selectedMemberId}
+                  className="poster-button"
+                >
+                  회원 직접 추가
+                </button>
+              ) : null}
             </div>
+            {!profile?.isAdmin ? (
+              <div className="mt-2 text-xs text-ink/60">일반 호스트는 회원 직접 추가를 할 수 없습니다. 초대 기능만 사용할 수 있습니다.</div>
+            ) : null}
             <div className="mt-3">
               <button
                 type="button"
@@ -974,45 +989,49 @@ export default function HostEventPage() {
             </div>
           </div>
 
-          <div className="mt-6 border-t border-line pt-4 text-sm font-semibold text-ink">직접 입력</div>
+          {profile?.isAdmin ? (
+            <>
+              <div className="mt-6 border-t border-line pt-4 text-sm font-semibold text-ink">직접 입력</div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_120px_120px_auto]">
-            <input
-              value={newPlayerName}
-              onChange={(event) => setNewPlayerName(event.target.value)}
-              placeholder="추가할 참가자 이름"
-              disabled={!participantsEditable}
-              className="poster-input"
-            />
-            <select
-              value={newPlayerGender}
-              onChange={(event) => setNewPlayerGender(event.target.value as Participant["gender"])}
-              disabled={!participantsEditable}
-              className="poster-input"
-            >
-              <option value="male">남성</option>
-              <option value="female">여성</option>
-              <option value="unspecified">미정</option>
-            </select>
-            <select
-              value={newPlayerSkill}
-              onChange={(event) => setNewPlayerSkill(event.target.value as SkillLevel)}
-              disabled={!participantsEditable}
-              className="poster-input"
-            >
-              <option value="high">상</option>
-              <option value="medium">중</option>
-              <option value="low">하</option>
-            </select>
-            <button
-              type="button"
-              onClick={handleAddParticipant}
-              disabled={!participantsEditable}
-              className="poster-button"
-            >
-              추가
-            </button>
-          </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_120px_120px_auto]">
+                <input
+                  value={newPlayerName}
+                  onChange={(event) => setNewPlayerName(event.target.value)}
+                  placeholder="추가할 참가자 이름"
+                  disabled={!participantsEditable}
+                  className="poster-input"
+                />
+                <select
+                  value={newPlayerGender}
+                  onChange={(event) => setNewPlayerGender(event.target.value as Participant["gender"])}
+                  disabled={!participantsEditable}
+                  className="poster-input"
+                >
+                  <option value="male">남성</option>
+                  <option value="female">여성</option>
+                  <option value="unspecified">미정</option>
+                </select>
+                <select
+                  value={newPlayerSkill}
+                  onChange={(event) => setNewPlayerSkill(event.target.value as SkillLevel)}
+                  disabled={!participantsEditable}
+                  className="poster-input"
+                >
+                  <option value="high">상</option>
+                  <option value="medium">중</option>
+                  <option value="low">하</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddParticipant}
+                  disabled={!participantsEditable}
+                  className="poster-button"
+                >
+                  추가
+                </button>
+              </div>
+            </>
+          ) : null}
 
           {error ? (
             <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

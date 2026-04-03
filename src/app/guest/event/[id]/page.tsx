@@ -1,7 +1,7 @@
 "use client";
 
 import { getClubById } from "@/lib/clubs";
-import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent, touchParticipantSession } from "@/lib/events";
+import { getCurrentRound, getEventNotifications, getParticipantBySession, getParticipantInstruction, isMatchReadyToStart, loadEvent, markEventNotificationRead, respondToScoreProposal, submitMatchScoreProposal, subscribeToEvent, touchParticipantSession } from "@/lib/events";
 import { buildFinalRanking } from "@/lib/history";
 import { getCurrentProfile } from "@/lib/auth";
 import { shouldConfirmScoreBeforeSave, validateScoreInput } from "@/lib/score";
@@ -14,6 +14,33 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const SCORE_OPTIONS = ["", "0", "1", "2", "3", "4", "5", "6"];
 
 function findNextMatchContext(event: Awaited<ReturnType<typeof loadEvent>> | null, participantId: string) {
+  if (!event) {
+    return null;
+  }
+
+  for (const round of Array.isArray(event.rounds) ? event.rounds : []) {
+    if (round.completed) {
+      continue;
+    }
+
+    const match = (Array.isArray(round.matches) ? round.matches : []).find(
+      (currentMatch) =>
+        !currentMatch.skipped &&
+        !currentMatch.completed &&
+        isMatchReadyToStart(event, round.roundNumber, currentMatch.id ?? null) &&
+        [...(Array.isArray(currentMatch.teamA) ? currentMatch.teamA : []), ...(Array.isArray(currentMatch.teamB) ? currentMatch.teamB : [])].some(
+          (player) => player.id === participantId,
+        ),
+    );
+    if (match) {
+      return { round, match };
+    }
+  }
+
+  return null;
+}
+
+function findAssignedMatchContext(event: Awaited<ReturnType<typeof loadEvent>> | null, participantId: string) {
   if (!event) {
     return null;
   }
@@ -90,6 +117,10 @@ function buildAssignmentMessage(event: Awaited<ReturnType<typeof loadEvent>> | n
   const currentRound = getCurrentRound(event);
   const assignment = findNextMatchContext(event, participantId);
   if (!assignment) {
+    const assignedMatch = findAssignedMatchContext(event, participantId);
+    if (assignedMatch) {
+      return { title: "대기 중", body: "아직 라운드 진행중 대기입니다" };
+    }
     return currentRound
       ? { title: `${currentRound.roundNumber}라운드 대기`, body: "현재 배정된 다음 경기가 없습니다. 잠시 대기해 주세요." }
       : { title: "이벤트 종료", body: "모든 라운드가 종료되었습니다." };
@@ -454,9 +485,6 @@ export default function GuestEventPage() {
             메인페이지 이동
           </Link>
         ) : null}
-        <Link href="/guest" className="poster-button-secondary">
-          다른 이벤트 참여
-        </Link>
         <button type="button" onClick={() => setShowAllRounds((current) => !current)} className="poster-button-secondary">
           {showAllRounds ? "게임화면으로 돌아가기" : "전체 라운드 보기"}
         </button>
@@ -475,6 +503,11 @@ export default function GuestEventPage() {
 
       <section className="border-t border-line py-6">
         <p className="poster-label">참가 상태</p>
+        {currentEvent?.eventName ? (
+          <div className="mt-2 text-sm font-semibold text-ink/65">
+            이벤트명: {currentEvent.eventName}
+          </div>
+        ) : null}
         <h1 className="mt-3 text-4xl font-black tracking-[-0.04em]">{assignment.title}</h1>
         <p className="mt-4 text-sm leading-6 text-ink/72">{assignment.body}</p>
         {currentMatch && currentMatchRound ? (

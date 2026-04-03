@@ -50,11 +50,8 @@ export default function GuestPage() {
       if (currentProfile?.id && !hasDirectEventTarget) {
         const activeSession = await loadReturnableParticipationSession(currentProfile.id);
         if (activeSession && activeSession.participant.role !== "host") {
-          const shouldResume = window.confirm("이전 라운드가 아직 종료되지 않았습니다. 이어서 참가하시겠습니까?");
-          if (shouldResume) {
-            router.replace(`/guest/event/${activeSession.event.id}`);
-            return;
-          }
+          router.replace(`/guest/event/${activeSession.event.id}`);
+          return;
         }
       }
     };
@@ -242,7 +239,6 @@ export default function GuestPage() {
       </div>
 
       <div className="mb-6 flex flex-wrap gap-3 border-t border-line py-4">
-        <Link href="/" className="poster-button-secondary">메인 페이지</Link>
         <Link href="/history/player" className="poster-button-secondary">내 기록</Link>
         <Link href="/history/host" className="poster-button-secondary">호스트 이력</Link>
       </div>

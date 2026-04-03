@@ -327,6 +327,7 @@ function findNextMatchAssignment(
       (currentMatch) =>
         !currentMatch.skipped &&
         !currentMatch.completed &&
+        isMatchReadyToStart(event, round.roundNumber, currentMatch.id ?? null) &&
         [...safeArray(currentMatch.teamA), ...safeArray(currentMatch.teamB)].some((player) => player.id === participantId),
     );
     if (match) {
@@ -339,6 +340,88 @@ function findNextMatchAssignment(
 
 function findCurrentMatchForParticipant(event: EventRecord, participantId: string): Match | null {
   return findNextMatchAssignment(event, participantId)?.match ?? null;
+}
+
+function findAssignedMatch(
+  event: EventRecord,
+  participantId: string,
+): { round: Round; match: Match } | null {
+  for (const round of safeArray(event.rounds)) {
+    if (round.completed) {
+      continue;
+    }
+
+    const match = safeArray(round.matches).find(
+      (currentMatch) =>
+        !currentMatch.skipped &&
+        !currentMatch.completed &&
+        [...safeArray(currentMatch.teamA), ...safeArray(currentMatch.teamB)].some((player) => player.id === participantId),
+    );
+    if (match) {
+      return { round, match };
+    }
+  }
+
+  return null;
+}
+
+function getMatchPlayerIds(match: Match): string[] {
+  return [...safeArray(match.teamA), ...safeArray(match.teamB)].map((player) => player.id);
+}
+
+export function isEventActivelyRunning(event: EventRecord | null | undefined): boolean {
+  if (!event) {
+    return false;
+  }
+
+  return event.status === "in_progress" && safeArray(event.participants).length > 0 && safeArray(event.rounds).length > 0;
+}
+
+export function isMatchReadyToStart(
+  event: EventRecord,
+  roundNumber: number,
+  matchId: string | null,
+): boolean {
+  if (!matchId) {
+    return false;
+  }
+
+  const targetRound = safeArray(event.rounds).find((round) => round.roundNumber === roundNumber);
+  const targetMatch = safeArray(targetRound?.matches).find((match) => match.id === matchId);
+  if (!targetRound || !targetMatch || targetRound.completed || targetMatch.completed || targetMatch.skipped) {
+    return false;
+  }
+
+  const targetPlayerIds = getMatchPlayerIds(targetMatch);
+  if (targetPlayerIds.length === 0) {
+    return false;
+  }
+
+  return targetPlayerIds.every((playerId) =>
+    !safeArray(event.rounds).some(
+      (round) =>
+        round.roundNumber < roundNumber &&
+        !round.completed &&
+        safeArray(round.matches).some(
+          (match) =>
+            !match.skipped &&
+            !match.completed &&
+            getMatchPlayerIds(match).includes(playerId),
+        ),
+    ),
+  );
+}
+
+export function hasPreparedNextMatch(event: EventRecord, participantId: string): boolean {
+  return Boolean(findNextMatchAssignment(event, participantId));
+}
+
+export function canShowParticipantMainPageLink(event: EventRecord, participantId: string): boolean {
+  if (!isEventActivelyRunning(event)) {
+    return true;
+  }
+
+  return !hasPreparedNextMatch(event, participantId);
 }
 
 function isParticipantActionRequired(event: EventRecord, participant: Participant): boolean {
@@ -376,8 +459,7 @@ function resolveParticipantSessionStatus(event: EventRecord, participant: Partic
     return "closed";
   }
 
-  const currentRound = getCurrentRound(event);
-  if (!currentRound || currentRound.completed) {
+  if (!isEventActivelyRunning(event)) {
     return "closed";
   }
 
@@ -753,7 +835,7 @@ type ActiveEventParticipation = {
 };
 
 function isUserActiveInEvent(event: EventRecord, userId: string): Participant | null {
-  if (!["recruiting", "in_progress"].includes(event.status)) {
+  if (!isEventActivelyRunning(event)) {
     return null;
   }
 
@@ -2389,7 +2471,11 @@ export function getVisibleRounds(event: EventRecord): Round[] {
 }
 
 export function getCurrentRoundNumber(event: EventRecord): number | null {
-  return safeArray(event?.rounds).find((round) => !round.completed)?.roundNumber ?? null;
+  return safeArray(event?.rounds).find(
+    (round) =>
+      !round.completed &&
+      safeArray(round.matches).some((match) => isMatchReadyToStart(event, round.roundNumber, match.id ?? null)),
+  )?.roundNumber ?? null;
 }
 
 export function getCurrentRound(event: EventRecord): Round | null {
@@ -2508,7 +2594,7 @@ export function getReturnableParticipant(
     return null;
   }
 
-  if (event.status !== "in_progress") {
+  if (!isEventActivelyRunning(event)) {
     return null;
   }
 
@@ -2561,6 +2647,10 @@ export function getParticipantInstruction(event: EventRecord, participantId: str
 
   const assignment = findNextMatchAssignment(event, participantId);
   if (!assignment) {
+    const assignedMatch = findAssignedMatch(event, participantId);
+    if (assignedMatch) {
+      return "아직 라운드 진행중 대기입니다";
+    }
     return getCurrentRound(event) ? "현재 배정된 다음 경기가 없습니다. 잠시 대기해 주세요." : "모든 라운드가 완료되었습니다.";
   }
 
