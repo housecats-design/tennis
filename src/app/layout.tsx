@@ -12,9 +12,15 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT ?? "unknown";
+  const buildEnv = process.env.NEXT_PUBLIC_BUILD_ENV ?? "unknown";
+
   return (
     <html lang="ko">
       <body>
+        <div className="fixed right-3 top-3 z-[120] rounded-full border border-line bg-white/92 px-3 py-1 text-[11px] font-semibold tracking-[0.04em] text-ink shadow-sm backdrop-blur">
+          버전 {buildCommit} · {buildEnv}
+        </div>
         <GlobalInvitationOverlay />
         {children}
       </body>

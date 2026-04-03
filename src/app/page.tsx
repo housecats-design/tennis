@@ -11,10 +11,12 @@ import {
   signUpAccount,
   subscribeAuthChanges,
 } from "@/lib/auth";
-import { dismissInvitation, findMostRecentActiveEventForUser, forceEndEvent, getCurrentRound, joinEvent, loadReturnableParticipationSession, loadUserInvitations, updateInvitationStatus } from "@/lib/events";
+import { dismissInvitation, findMostRecentActiveEventForUser, forceEndEvent, getCurrentRound, getReturnableParticipant, joinEvent, loadEvent, loadReturnableParticipationSession, loadUserInvitations, repairParticipantUserLink, updateInvitationStatus } from "@/lib/events";
 import {
   clearLastParticipation,
   clearPostLoginRedirect,
+  loadLastEvent,
+  loadLastParticipant,
   loadLastRole,
   loadPostLoginRedirect,
   saveLastEvent,
@@ -118,9 +120,52 @@ export default function HomePage() {
     );
 
     if (!returnableSession) {
-      clearLastParticipation();
-      setResumeRoute(null);
-      setActiveEventSummary(null);
+      const lastEventId = loadLastEvent();
+      const lastParticipantId = loadLastParticipant();
+      const lastEvent = lastEventId
+        ? await withTimeout(loadEvent(lastEventId), HOME_AUTH_TIMEOUT_MS, null, "loadEvent")
+        : null;
+      const lastParticipant = getReturnableParticipant(lastEvent, {
+        userId,
+        participantId: lastParticipantId,
+      });
+
+      if (!lastEvent || !lastParticipant) {
+        clearLastParticipation();
+        setResumeRoute(null);
+        setActiveEventSummary(null);
+        return;
+      }
+
+      const repairedEvent =
+        lastParticipant.userId === userId
+          ? lastEvent
+          : await withTimeout(
+              repairParticipantUserLink(lastEvent.id, lastParticipant.id, userId),
+              HOME_AUTH_TIMEOUT_MS,
+              lastEvent,
+              "repairParticipantUserLink",
+            );
+      const resolvedEvent = repairedEvent ?? lastEvent;
+      const resolvedParticipant =
+        resolvedEvent.participants.find((participant) => participant.id === lastParticipant.id) ?? lastParticipant;
+      const resolvedRoute =
+        resolvedParticipant.role === "host"
+          ? `/host/event/${resolvedEvent.id}`
+          : `/guest/event/${resolvedEvent.id}`;
+      const resolvedRound = getCurrentRound(resolvedEvent);
+      saveLastEvent(resolvedEvent.id);
+      saveLastParticipant(resolvedParticipant.id);
+      setResumeRoute(resolvedRoute);
+      setActiveEventSummary({
+        eventId: resolvedEvent.id,
+        eventName: resolvedEvent.eventName,
+        currentRoundLabel: resolvedRound ? `${resolvedRound.roundNumber}라운드` : "대기 중",
+        participantCount: resolvedEvent.participants.length,
+        statusLabel: resolvedEvent.status === "in_progress" ? "진행중" : resolvedEvent.status,
+        route: resolvedRoute,
+        role: resolvedParticipant.role === "host" ? "host" : "guest",
+      });
       return;
     }
 

@@ -1399,6 +1399,28 @@ export async function joinEvent(
   return nextParticipant;
 }
 
+export async function repairParticipantUserLink(
+  eventId: string,
+  participantId: string,
+  userId: string,
+): Promise<EventRecord | null> {
+  if (!eventId || !participantId || !userId) {
+    return loadEvent(eventId);
+  }
+
+  return updateEvent(eventId, (currentEvent) => ({
+    ...currentEvent,
+    participants: currentEvent.participants.map((participant) =>
+      participant.id === participantId
+        ? {
+            ...participant,
+            userId,
+          }
+        : participant,
+    ),
+  }));
+}
+
 export async function saveParticipants(eventId: string, participants: Participant[]): Promise<EventRecord | null> {
   validateParticipants(participants);
 
